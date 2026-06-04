@@ -15,14 +15,14 @@ final class TGS_AI_Guides_Ajax
         add_action('wp_ajax_tgs_ai_guides_chat', array(__CLASS__, 'chat'));
     }
 
-    public static function has_seen($view, $version)
+    public static function has_seen($view, $version, $page = 'tgs-shop-management')
     {
         $user_id = get_current_user_id();
         if (!$user_id) {
             return false;
         }
 
-        return (bool) get_user_meta($user_id, self::seen_key($view, $version), true);
+        return (bool) get_user_meta($user_id, self::seen_key($view, $version, $page), true);
     }
 
     public static function mark_seen()
@@ -30,16 +30,18 @@ final class TGS_AI_Guides_Ajax
         self::verify_request();
 
         $view = isset($_POST['view']) ? sanitize_key(wp_unslash($_POST['view'])) : 'dashboard';
+        $page = isset($_POST['page']) ? sanitize_key(wp_unslash($_POST['page'])) : 'tgs-shop-management';
         $version = isset($_POST['version']) ? sanitize_key(wp_unslash($_POST['version'])) : TGS_AI_Guides_Registry::VERSION;
         $source = isset($_POST['source']) ? sanitize_key(wp_unslash($_POST['source'])) : 'unknown';
 
         update_user_meta(
             get_current_user_id(),
-            self::seen_key($view, $version),
+            self::seen_key($view, $version, $page),
             array(
                 'seen_at' => current_time('mysql'),
                 'source' => $source,
                 'blog_id' => get_current_blog_id(),
+                'page' => $page,
             )
         );
 
@@ -52,6 +54,7 @@ final class TGS_AI_Guides_Ajax
 
         $scope = isset($_POST['scope']) ? sanitize_key(wp_unslash($_POST['scope'])) : 'current';
         $view = isset($_POST['view']) ? sanitize_key(wp_unslash($_POST['view'])) : 'dashboard';
+        $page = isset($_POST['page']) ? sanitize_key(wp_unslash($_POST['page'])) : 'tgs-shop-management';
         $version = isset($_POST['version']) ? sanitize_key(wp_unslash($_POST['version'])) : TGS_AI_Guides_Registry::VERSION;
         $user_id = get_current_user_id();
 
@@ -64,7 +67,7 @@ final class TGS_AI_Guides_Ajax
                 }
             }
         } else {
-            delete_user_meta($user_id, self::seen_key($view, $version));
+            delete_user_meta($user_id, self::seen_key($view, $version, $page));
         }
 
         wp_send_json_success(array('message' => 'reset'));
@@ -75,25 +78,26 @@ final class TGS_AI_Guides_Ajax
         self::verify_request();
 
         $view = isset($_POST['view']) ? sanitize_key(wp_unslash($_POST['view'])) : 'dashboard';
+        $page = isset($_POST['page']) ? sanitize_key(wp_unslash($_POST['page'])) : 'tgs-shop-management';
         $question = isset($_POST['question']) ? sanitize_text_field(wp_unslash($_POST['question'])) : '';
 
         if ($question === '') {
             wp_send_json_error(array('message' => 'Câu hỏi đang trống.'), 400);
         }
 
-        $tour = TGS_AI_Guides_Registry::get_tour($view);
+        $tour = TGS_AI_Guides_Registry::get_tour($view, $page);
 
-        $external_answer = apply_filters('tgs_ai_guides_ai_answer', null, $question, $view, $tour);
+        $external_answer = apply_filters('tgs_ai_guides_ai_answer', null, $question, $view, $tour, $page);
         if (is_array($external_answer)) {
             wp_send_json_success($external_answer);
         }
 
-        wp_send_json_success(TGS_AI_Guides_Registry::answer_question($view, $question));
+        wp_send_json_success(TGS_AI_Guides_Registry::answer_question($view, $question, $page));
     }
 
-    public static function seen_key($view, $version)
+    public static function seen_key($view, $version, $page = 'tgs-shop-management')
     {
-        return 'tgs_ai_guides_seen_' . get_current_blog_id() . '_' . sanitize_key($view) . '_' . sanitize_key($version);
+        return 'tgs_ai_guides_seen_' . get_current_blog_id() . '_' . sanitize_key($page) . '_' . sanitize_key($view) . '_' . sanitize_key($version);
     }
 
     private static function verify_request()

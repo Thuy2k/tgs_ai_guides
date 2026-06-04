@@ -64,6 +64,7 @@
         state.markedSeen = true;
 
         return post('tgs_ai_guides_mark_seen', {
+            page: config.page || 'tgs-shop-management',
             view: config.view,
             version: config.tour.version,
             source: source || 'tour'
@@ -196,6 +197,7 @@
             button.addEventListener('click', function () {
                 post('tgs_ai_guides_reset_seen', {
                     scope: 'site',
+                    page: config.page || 'tgs-shop-management',
                     view: config.view,
                     version: config.tour.version
                 }).then(function () {
@@ -285,6 +287,7 @@
         togglePanel(true);
 
         post('tgs_ai_guides_chat', {
+            page: config.page || 'tgs-shop-management',
             view: config.view,
             question: question
         }).then(function (response) {
@@ -332,7 +335,12 @@
             if (!item) {
                 continue;
             }
-            var found = document.querySelector(item);
+            var found = null;
+            try {
+                found = document.querySelector(item);
+            } catch (error) {
+                found = null;
+            }
             if (found && isVisibleElement(found)) {
                 return found;
             }

@@ -45,13 +45,14 @@ final class TGS_AI_Guides
             return;
         }
 
+        $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : 'tgs-shop-management';
         $view = isset($_GET['view']) ? sanitize_key(wp_unslash($_GET['view'])) : 'dashboard';
         if ($view === '') {
             $view = 'dashboard';
         }
 
-        $tour = TGS_AI_Guides_Registry::get_tour($view);
-        $has_seen = TGS_AI_Guides_Ajax::has_seen($view, $tour['version']);
+        $tour = TGS_AI_Guides_Registry::get_tour($view, $page);
+        $has_seen = TGS_AI_Guides_Ajax::has_seen($view, $tour['version'], $page);
 
         wp_enqueue_style(
             'tgs-ai-guides-driver',
@@ -87,7 +88,7 @@ final class TGS_AI_Guides
             'ajaxUrl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce(TGS_AI_Guides_Ajax::NONCE_ACTION),
             'view' => $view,
-            'page' => 'tgs-shop-management',
+            'page' => $page,
             'siteId' => get_current_blog_id(),
             'userId' => get_current_user_id(),
             'autoStart' => !$has_seen && !empty($tour['steps']),
@@ -120,7 +121,12 @@ final class TGS_AI_Guides
 
         $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
 
-        return $page === 'tgs-shop-management';
+        $supported_pages = apply_filters(
+            'tgs_ai_guides_supported_pages',
+            array('tgs-shop-management', 'tgs-permission', 'tgs-permission-roles', 'bizgpt-tmd-pos')
+        );
+
+        return in_array($page, array_map('sanitize_key', $supported_pages), true);
     }
 
     private static function asset_version($relative_path)

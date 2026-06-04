@@ -6,39 +6,55 @@ if (!defined('ABSPATH')) {
 
 final class TGS_AI_Guides_Registry
 {
-    const VERSION = '2026-06-04-01';
+    const VERSION = '2026-06-04-02';
 
-    public static function get_tour($view)
+    public static function get_tour($view, $page = 'tgs-shop-management')
     {
         $view = sanitize_key($view ?: 'dashboard');
+        $page = sanitize_key($page ?: 'tgs-shop-management');
         $definitions = self::definitions();
-        $group = self::resolve_group($view);
-        $page = isset($definitions[$group]) ? $definitions[$group] : $definitions['generic'];
+        $guide_key = self::resolve_guide_key($view, $page);
+        $guide = isset($definitions[$guide_key]) ? $definitions[$guide_key] : $definitions['generic'];
         $base = $definitions['base'];
 
         $quick_questions = array_values(array_unique(array_merge(
-            $page['quick_questions'],
+            $guide['quick_questions'],
             array('Hướng dẫn lại trang này', 'Trang này dùng để làm gì?')
         )));
 
-        $tour = array(
-            'id' => 'tgs-shop-' . $view,
-            'version' => self::VERSION,
-            'view' => $view,
-            'group' => $group,
-            'title' => $page['title'],
-            'summary' => $page['summary'],
-            'quickQuestions' => $quick_questions,
-            'steps' => array_values(array_merge($base['steps'], $page['steps'])),
-            'knowledge' => array_values(array_merge($base['knowledge'], $page['knowledge'])),
+        $context = wp_parse_args(
+            $guide['context'],
+            array(
+                'page' => $page,
+                'view' => $view,
+                'guideKey' => $guide_key,
+                'source' => 'TGS Shop Management operating guide',
+                'aiReady' => true,
+                'aiInstruction' => 'Trả lời bằng tiếng Việt, bám sát view hiện tại, chỉ hướng dẫn nghiệp vụ và thao tác trong trang này.',
+            )
         );
 
-        return apply_filters('tgs_ai_guides_tour', $tour, $view, $group);
+        $tour = array(
+            'id' => 'tgs-' . $page . '-' . $view,
+            'version' => self::VERSION,
+            'page' => $page,
+            'view' => $view,
+            'group' => $guide_key,
+            'guideKey' => $guide_key,
+            'title' => $guide['title'],
+            'summary' => $guide['summary'],
+            'quickQuestions' => $quick_questions,
+            'steps' => array_values(array_merge($base['steps'], $guide['steps'])),
+            'knowledge' => array_values(array_merge($base['knowledge'], $guide['knowledge'])),
+            'context' => $context,
+        );
+
+        return apply_filters('tgs_ai_guides_tour', $tour, $view, $guide_key, $page);
     }
 
-    public static function answer_question($view, $question)
+    public static function answer_question($view, $question, $page = 'tgs-shop-management')
     {
-        $tour = self::get_tour($view);
+        $tour = self::get_tour($view, $page);
         $normalized_question = self::normalize($question);
         $best = null;
         $best_score = 0;
@@ -63,13 +79,15 @@ final class TGS_AI_Guides_Registry
                 'answer' => $best['answer'],
                 'matched' => true,
                 'quickQuestions' => $tour['quickQuestions'],
+                'context' => $tour['context'],
             );
         }
 
         return array(
-            'answer' => 'Mình đang dựa trên hướng dẫn của màn hình "' . $tour['title'] . '". ' . $tour['summary'] . ' Bạn có thể hỏi cụ thể hơn như: "' . implode('", "', array_slice($tour['quickQuestions'], 0, 3)) . '".',
+            'answer' => 'Mình đang trả lời theo ngữ cảnh riêng của màn hình "' . $tour['title'] . '". ' . $tour['summary'] . ' Bạn có thể hỏi cụ thể hơn như: "' . implode('", "', array_slice($tour['quickQuestions'], 0, 3)) . '".',
             'matched' => false,
             'quickQuestions' => $tour['quickQuestions'],
+            'context' => $tour['context'],
         );
     }
 
@@ -81,26 +99,105 @@ final class TGS_AI_Guides_Registry
         return $definitions;
     }
 
-    private static function resolve_group($view)
+    public static function view_coverage()
     {
-        $map = array(
+        return self::view_map();
+    }
+
+    private static function resolve_guide_key($view, $page = 'tgs-shop-management')
+    {
+        $view = sanitize_key($view ?: 'dashboard');
+        $page = sanitize_key($page ?: 'tgs-shop-management');
+        $page_map = array(
+            'tgs-permission' => 'permission_settings',
+            'tgs-permission-roles' => 'permission_roles',
+            'bizgpt-tmd-pos' => 'pos_screen',
+        );
+
+        if ($page !== 'tgs-shop-management' && isset($page_map[$page])) {
+            return apply_filters('tgs_ai_guides_group_for_view', $page_map[$page], $view, $page);
+        }
+
+        $map = self::view_map();
+        if (isset($map[$view])) {
+            return apply_filters('tgs_ai_guides_group_for_view', $map[$view], $view, $page);
+        }
+
+        if (strpos($view, 'ticket-') === 0) {
+            if (strpos($view, '-detail') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'ticket_detail', $view, $page);
+            }
+            if (strpos($view, '-edit') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'ticket_edit', $view, $page);
+            }
+            return apply_filters('tgs_ai_guides_group_for_view', 'ticket_list', $view, $page);
+        }
+
+        if (strpos($view, 'report-') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'report_detail', $view, $page);
+        }
+
+        if (strpos($view, 'selling-policy') === 0 || strpos($view, 'selling-') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'selling_policy', $view, $page);
+        }
+
+        if (strpos($view, 'loyalty-') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'loyalty_policy', $view, $page);
+        }
+
+        if (strpos($view, 'viettel-invoice') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'viettel_invoice', $view, $page);
+        }
+
+        if (strpos($view, 'product') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'product_list', $view, $page);
+        }
+
+        return apply_filters('tgs_ai_guides_group_for_view', 'generic', $view, $page);
+    }
+
+    private static function view_map()
+    {
+        return array(
             'dashboard' => 'entry_dashboard',
             'dashboard-info' => 'entry_dashboard',
             'dashboard-global' => 'dashboard_global',
+
             'products-v2' => 'product_list',
-            'milk-under24m' => 'product_list',
+            'product-add' => 'product_form',
+            'product-edit' => 'product_form',
+            'products-excel-import' => 'product_excel_import',
+            'products-category-import' => 'product_excel_import',
+            'products-price-import' => 'product_excel_import',
+            'products-price-merge' => 'product_bulk_tools',
+            'products-smart-price-update' => 'product_bulk_tools',
+            'products-smart-thumbnail-update' => 'product_bulk_tools',
+            'products-smart-unit-update' => 'product_bulk_tools',
+            'products-smart-barcode-update' => 'product_bulk_tools',
+            'products-quantity-import' => 'product_excel_import',
+            'products-tracking-enable' => 'product_hsd_bulk',
+            'products-tracking-disable' => 'product_hsd_bulk',
+            'milk-under24m' => 'milk_under24m',
+            'milk-under24m-import' => 'milk_under24m_import',
+
             'categories-v2' => 'category_list',
-            'inventory' => 'inventory_report',
-            'analytics-shop-inventory' => 'inventory_report',
-            'inventory-manual-v2' => 'inventory_report',
-            'warehouse-zone' => 'warehouse_zone',
-            'lot-tracking' => 'lot_tracking',
-            'contacts' => 'partner_list',
-            'contact-detail' => 'partner_list',
-            'suppliers-global' => 'partner_list',
-            'supplier-global-detail' => 'partner_list',
+            'category-add' => 'category_form',
+            'category-edit' => 'category_form',
+            'categories-excel-import' => 'category_import',
+
+            'contacts' => 'contact_list',
+            'customers-excel-import' => 'customer_import',
+            'contact-detail' => 'contact_detail',
+            'suppliers' => 'supplier_list',
+            'suppliers-global' => 'supplier_list',
+            'supplier-global-detail' => 'supplier_detail',
+            'supplier-migration' => 'supplier_migration',
+            'suppliers-excel-import' => 'supplier_import',
             'org-chart-view' => 'partner_list',
-            'ticket-relationships' => 'ticket_list',
+
+            'ticket-relationships' => 'ticket_relationships',
+            'purchases' => 'ticket_list',
+            'sales' => 'ticket_list',
             'ticket-purchases' => 'ticket_list',
             'ticket-sales' => 'ticket_list',
             'ticket-returns' => 'ticket_list',
@@ -119,292 +216,1147 @@ final class TGS_AI_Guides_Registry
             'ticket-adjustment-add' => 'ticket_create',
             'receipt-v2-add' => 'transaction_create',
             'payment-v2-add' => 'transaction_create',
+            'purchase-detail' => 'ticket_detail',
+            'sale-detail' => 'ticket_detail',
+            'adjustment-detail' => 'ticket_detail',
+            'ticket-purchase-detail' => 'ticket_detail',
+            'ticket-sale-detail' => 'ticket_detail',
+            'ticket-return-detail' => 'ticket_detail',
+            'ticket-supplier-return-detail' => 'ticket_detail',
+            'ticket-damage-detail' => 'ticket_detail',
+            'ticket-adjustment-detail' => 'ticket_detail',
+            'ticket-receipt-v2-detail' => 'ticket_detail',
+            'ticket-payment-v2-detail' => 'ticket_detail',
+            'ticket-import-v2-detail' => 'ticket_detail',
+            'ticket-export-v2-detail' => 'ticket_detail',
+            'ticket-purchase-edit' => 'ticket_edit',
+            'ticket-sale-edit' => 'ticket_edit',
+            'ticket-transfer-export-edit' => 'ticket_edit',
+
+            'inventory' => 'inventory_report',
+            'inventory-print' => 'inventory_print',
+            'inventory-manual-v2' => 'inventory_manual',
+            'analytics-shop-inventory' => 'inventory_report',
+            'warehouse-zone' => 'warehouse_zone',
+            'lot-tracking' => 'lot_tracking',
+            'identifier-generate-detail' => 'identifier_generate',
+            'lots' => 'lot_tracking',
+            'import' => 'legacy_import',
+            'ledger' => 'ledger_view',
+
+            'reports' => 'reports_overview',
+            'report-dashboard' => 'report_dashboard',
+            'storekeeper-stock-report' => 'storekeeper_report',
+
             'admin-settings' => 'settings',
-            'label-print-settings' => 'settings',
-            'brand-settings' => 'settings',
-            'api' => 'api',
-            'api-detail' => 'api',
+            'label-print-settings' => 'label_print_settings',
+            'brand-settings' => 'brand_settings',
+            'sync-categories' => 'sync_data',
+            'sync-products' => 'sync_data',
+            'api' => 'api_list',
+            'api-detail' => 'api_detail',
+            'tools-merge-guest-persons' => 'merge_guest_persons',
             'ai-guides' => 'guide_settings',
+
+            'selling-dashboard' => 'selling_dashboard',
+            'selling-policies' => 'selling_policy',
+            'selling-policy-add' => 'selling_policy_form',
+            'selling-policy-detail' => 'selling_policy_detail',
+            'selling-policy-group-detail' => 'selling_policy_group',
+            'selling-policy-report' => 'selling_policy_report',
+
+            'loyalty-dashboard' => 'loyalty_policy',
+            'loyalty-policies' => 'loyalty_policy',
+            'loyalty-policy-add' => 'loyalty_policy',
+            'loyalty-policy-detail' => 'loyalty_policy',
+            'loyalty-members' => 'loyalty_policy',
+            'loyalty-settings' => 'loyalty_policy',
+
+            'zalo-oa' => 'zalo_oa',
+            'zalo-log' => 'zalo_oa',
+            'viettel-invoice-create' => 'viettel_invoice',
+            'viettel-invoice-settings' => 'viettel_invoice_settings',
+            'viettel-invoice-guide' => 'viettel_invoice',
         );
-
-        if (isset($map[$view])) {
-            return apply_filters('tgs_ai_guides_group_for_view', $map[$view], $view);
-        }
-
-        if (strpos($view, 'product') === 0 || strpos($view, 'categories') === 0 || strpos($view, 'category') === 0) {
-            return apply_filters('tgs_ai_guides_group_for_view', 'product_list', $view);
-        }
-
-        if (strpos($view, 'ticket-') === 0) {
-            return apply_filters('tgs_ai_guides_group_for_view', 'ticket_list', $view);
-        }
-
-        return apply_filters('tgs_ai_guides_group_for_view', 'generic', $view);
     }
 
     private static function definitions()
     {
+        $generic_steps = array(
+            self::step('h4, .card-title, .wrap h1', 'Tiêu đề nghiệp vụ', 'Đọc tiêu đề để xác nhận đúng màn hình trước khi nhập liệu, lọc báo cáo hoặc xử lý chứng từ.', 'bottom', 'start'),
+            self::step('.card, table, form, .wrap', 'Khối thao tác chính', 'Các bảng, form, card hoặc vùng báo cáo trên trang là nơi nhập liệu, kiểm tra và xử lý nghiệp vụ của view hiện tại.', 'top', 'center'),
+        );
+
+        $generic_knowledge = array(
+            self::knowledge(array('bat dau', 'thao tac', 'dung de lam gi', 'trang nay'), 'Hãy xác nhận tiêu đề trang, xem nhóm nút ở đầu trang, sau đó thao tác trong bảng hoặc form chính. Nếu chưa chắc vị trí thao tác, bấm "Hướng dẫn lại trang này".'),
+        );
+
         return array(
             'base' => array(
                 'steps' => array(
-                    self::step('#tgs-mega-nav', 'Thanh điều hướng chính', 'Đây là nơi nhân viên chuyển nhanh giữa Dashboard, Sản phẩm, Đối tác, Giao dịch, Kho hàng, Báo cáo, Công cụ và Hệ thống.', 'bottom', 'center'),
-                    self::step('#globalSearchWrapper', 'Tìm kiếm toàn hệ thống', 'Dùng ô này để tìm nhanh barcode, sản phẩm hoặc phiếu. Nhân viên có thể bấm Ctrl+K nếu đang thao tác bằng bàn phím.', 'bottom', 'center'),
-                    self::step('.tgs-nav-items', 'Các nhóm nghiệp vụ', 'Mỗi nhóm menu bám theo quy trình vận hành thực tế: hàng hóa, đối tác, chứng từ, kho và báo cáo.', 'bottom', 'center'),
-                    self::step('.container-xxl.flex-grow-1.container-p-y', 'Vùng làm việc của trang', 'Toàn bộ bảng dữ liệu, form nhập liệu và báo cáo của màn hình hiện tại nằm trong khu vực này.', 'top', 'center'),
-                    self::step('.tgs-ai-guide-launcher', 'AI hỗ trợ hướng dẫn', 'Bấm nút này bất cứ lúc nào để xem lại tour hoặc hỏi nhanh về cách dùng màn hình hiện tại.', 'left', 'end'),
+                    self::step('#tgs-mega-nav, .layout-navbar, .menu, #adminmenu', 'Thanh điều hướng chính', 'Dùng để chuyển giữa Dashboard, Sản phẩm, Đối tác, Giao dịch, Kho hàng, Báo cáo, Công cụ và Hệ thống.', 'bottom', 'center'),
+                    self::step('#globalSearchWrapper, #globalSearchInput, .tgs-global-search', 'Tìm kiếm toàn hệ thống', 'Tra nhanh barcode, sản phẩm hoặc phiếu. Khi đang thao tác bằng bàn phím, có thể dùng Ctrl+K nếu trang hỗ trợ.', 'bottom', 'center'),
+                    self::step('.tgs-nav-items, .menu-inner, #adminmenu', 'Nhóm menu nghiệp vụ', 'Menu được chia theo luồng vận hành: hàng hóa, đối tác, chứng từ, kho, báo cáo, hệ thống và các plugin mở rộng.', 'bottom', 'center'),
+                    self::step('.container-xxl.flex-grow-1.container-p-y, .wrap, #wpbody-content', 'Vùng làm việc hiện tại', 'Toàn bộ bảng dữ liệu, form nhập liệu, báo cáo và cấu hình của view đang mở nằm trong khu vực này.', 'top', 'center'),
+                    self::step('.tgs-ai-guide-launcher', 'AI hỗ trợ theo trang', 'Bấm nút này để chạy lại tour driver.js hoặc hỏi nhanh. Câu trả lời bám theo đúng view hiện tại, không dùng chung ngữ cảnh với trang khác.', 'left', 'end'),
                 ),
                 'knowledge' => array(
-                    self::knowledge(array('tim kiem', 'search', 'ctrl k', 'barcode'), 'Dùng thanh tìm kiếm trên đầu trang để tra barcode, sản phẩm hoặc phiếu. Khi cần thao tác nhanh, bấm Ctrl+K rồi nhập từ khóa.'),
-                    self::knowledge(array('huong dan lai', 'xem lai', 'driver', 'tour'), 'Bấm nút "AI hỗ trợ" ở góc dưới bên phải, sau đó chọn "Hướng dẫn lại" để chạy lại tour của màn hình hiện tại.'),
-                    self::knowledge(array('bo qua', 'khong hien nua', 'an huong dan'), 'Bấm "Bỏ qua trang này" hoặc nút đóng trong tour. Hệ thống sẽ lưu trạng thái theo tài khoản, website chi nhánh và view hiện tại.'),
-                    self::knowledge(array('ai that', 'ket noi ai', 'chatgpt', 'mo rong'), 'Hiện tại khung hỗ trợ trả lời theo bộ hướng dẫn nội bộ của từng trang. Plugin đã mở sẵn filter `tgs_ai_guides_ai_answer` để sau này nối sang AI thật cho toàn website.'),
+                    self::knowledge(array('tim kiem', 'search', 'ctrl k', 'barcode'), 'Dùng thanh tìm kiếm trên đầu trang để tra barcode, sản phẩm hoặc phiếu. Nếu trang hỗ trợ phím tắt, bấm Ctrl+K rồi nhập từ khóa.'),
+                    self::knowledge(array('huong dan lai', 'xem lai', 'driver', 'tour'), 'Bấm nút "AI hỗ trợ" ở góc dưới bên phải, sau đó chọn "Hướng dẫn lại" để chạy lại tour driver.js của đúng màn hình hiện tại.'),
+                    self::knowledge(array('bo qua', 'khong hien nua', 'an huong dan'), 'Bấm "Bỏ qua trang này" hoặc đóng tour. Trạng thái đã xem được lưu theo tài khoản, site hiện tại và view hiện tại.'),
+                    self::knowledge(array('ai that', 'ket noi ai', 'chatgpt', 'mo rong'), 'Khung hiện tại trả lời theo bộ hướng dẫn nội bộ của từng view. Plugin đã để sẵn filter `tgs_ai_guides_ai_answer`; sau này có thể nối AI thật và truyền toàn bộ `tour.context` để trả lời theo trang.'),
                 ),
             ),
-            'entry_dashboard' => array(
-                'title' => 'Trang chọn khu vực làm việc',
-                'summary' => 'Trang này giúp nhân viên chọn vào POS bán hàng hoặc khu vực quản trị kho.',
-                'quick_questions' => array('Khi nào vào POS?', 'Khi nào vào quản trị kho?', 'Tôi muốn xem dashboard kho'),
-                'steps' => array(
-                    self::step('.tgs-entry-hero', 'Chọn đúng khu vực làm việc', 'Màn hình đầu tiên phân tách thao tác bán hàng tại quầy và thao tác quản trị kho.', 'bottom', 'center'),
-                    self::step('.tgs-entry-card-pos', 'POS bán hàng', 'Dành cho nhân viên bán hàng tại quầy, ưu tiên tạo đơn nhanh và thanh toán.', 'right', 'center'),
-                    self::step('.tgs-entry-card-admin', 'Quản trị kho', 'Dành cho kho, kế toán mua, quản lý cửa hàng và admin khi cần xử lý hàng hóa, phiếu và báo cáo.', 'left', 'center'),
+
+            'entry_dashboard' => self::guide(
+                'Trang chọn khu vực làm việc',
+                'Màn hình đầu vào giúp nhân viên chọn POS bán hàng hoặc khu vực quản trị kho.',
+                array('Khi nào vào POS?', 'Khi nào vào quản trị kho?', 'Tôi muốn xem dashboard kho'),
+                array(
+                    self::step('.tgs-entry-hero, .tgs-entry-card-pos, .tgs-entry-card-admin', 'Chọn đúng khu vực làm việc', 'POS dành cho bán hàng tại quầy; quản trị kho dành cho hàng hóa, chứng từ, tồn kho và báo cáo.', 'bottom', 'center'),
+                    self::step('.tgs-entry-card-pos, a[href*="pos"], a[href*="bizgpt-tmd-pos"]', 'POS bán hàng', 'Đi vào luồng tạo đơn nhanh, thanh toán và in hóa đơn tại quầy.', 'right', 'center'),
+                    self::step('.tgs-entry-card-admin, a[href*="dashboard-global"]', 'Quản trị kho', 'Dành cho kho, kế toán mua, quản lý và admin khi cần xử lý sản phẩm, phiếu, tồn và cấu hình.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('pos', 'ban hang', 'tai quay'), 'Vào POS khi nhân viên đang bán hàng trực tiếp tại quầy và cần tạo đơn nhanh cho khách.'),
-                    self::knowledge(array('quan tri', 'kho', 'dashboard'), 'Vào quản trị kho khi cần xem tồn, tạo phiếu, quản lý sản phẩm, nhà cung cấp hoặc kiểm tra báo cáo.'),
+                array(
+                    self::knowledge(array('pos', 'ban hang', 'tai quay'), 'Vào POS khi đang bán hàng trực tiếp tại quầy, cần tạo đơn nhanh, thanh toán, in phiếu hoặc gửi thông tin đơn cho khách.'),
+                    self::knowledge(array('quan tri', 'kho', 'dashboard'), 'Vào quản trị kho khi cần xem tồn, tạo phiếu, quản lý sản phẩm, nhà cung cấp, phân kho, báo cáo hoặc cài đặt vận hành.'),
                 ),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS', '15. Nhóm báo cáo'))
             ),
-            'dashboard_global' => array(
-                'title' => 'Dashboard quản trị kho',
-                'summary' => 'Trang này tóm tắt số liệu sản phẩm, tồn kho, đối tác và giao dịch gần đây của website chi nhánh.',
-                'quick_questions' => array('Các thẻ số liệu nghĩa là gì?', 'Làm mới dashboard thế nào?', 'Tạo phiếu nhanh ở đâu?'),
-                'steps' => array(
-                    self::step('.tgs-dash-stats', 'Các chỉ số nhanh', 'Theo dõi số lượng sản phẩm, tồn kho, nhà cung cấp, khách hàng và tình trạng phiếu trong tháng.', 'bottom', 'center'),
-                    self::step('#d-refresh', 'Làm mới dữ liệu', 'Bấm nút này khi cần tải lại số liệu mới nhất sau khi vừa nhập phiếu hoặc đồng bộ dữ liệu.', 'left', 'center'),
-                    self::step('#d-recent', 'Giao dịch gần đây', 'Khu vực này giúp quản lý kiểm tra các phiếu vừa phát sinh và trạng thái xử lý.', 'top', 'center'),
-                    self::step('.tgs-quick-link', 'Truy cập nhanh', 'Các lối tắt thường dùng để tạo phiếu nhập, phiếu xuất, thêm sản phẩm hoặc mở danh sách sản phẩm.', 'left', 'center'),
+
+            'dashboard_global' => self::guide(
+                'Dashboard quản trị kho',
+                'Trang tổng quan hiển thị số liệu nhanh về sản phẩm, tồn kho, đối tác và chứng từ gần đây.',
+                array('Các thẻ số liệu nghĩa là gì?', 'Làm mới dashboard thế nào?', 'Tạo phiếu nhanh ở đâu?'),
+                array(
+                    self::step('.tgs-dash-stats, .row .card', 'Các chỉ số nhanh', 'Theo dõi số lượng sản phẩm, tồn kho, khách hàng, nhà cung cấp và tình hình chứng từ.', 'bottom', 'center'),
+                    self::step('#d-refresh, .btn[id*="refresh"], button[id*="Refresh"]', 'Làm mới dữ liệu', 'Bấm khi cần tải lại số liệu sau khi nhập phiếu, đồng bộ hoặc chỉnh dữ liệu.', 'left', 'center'),
+                    self::step('#d-recent, table, .card-datatable', 'Giao dịch gần đây', 'Kiểm tra các phiếu mới phát sinh, loại phiếu, đối tác, số lượng và trạng thái.', 'top', 'center'),
+                    self::step('.tgs-quick-link, a[href*="purchase-add"], a[href*="sale-add"]', 'Truy cập nhanh', 'Đi thẳng tới các thao tác hay dùng như tạo phiếu, thêm sản phẩm hoặc mở danh sách sản phẩm.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('lam moi', 'refresh', 'cap nhat'), 'Bấm "Làm mới" ở góc phải phần tiêu đề dashboard để tải lại số liệu mới nhất.'),
-                    self::knowledge(array('giao dich gan day', 'phieu gan day'), 'Bảng giao dịch gần đây cho biết các phiếu mới phát sinh, loại phiếu, đối tác, số lượng và trạng thái.'),
-                    self::knowledge(array('truy cap nhanh', 'tao phieu nhanh'), 'Khu "Truy cập nhanh" đưa nhân viên đến các thao tác hay dùng như tạo phiếu nhập, phiếu xuất, thêm sản phẩm hoặc mở danh sách sản phẩm.'),
+                array(
+                    self::knowledge(array('lam moi', 'refresh', 'cap nhat'), 'Bấm nút làm mới ở phần đầu dashboard để tải lại số liệu mới nhất.'),
+                    self::knowledge(array('giao dich gan day', 'phieu gan day'), 'Khu giao dịch gần đây giúp quản lý kiểm tra chứng từ vừa phát sinh và trạng thái xử lý.'),
+                    self::knowledge(array('truy cap nhanh', 'tao phieu nhanh'), 'Dùng nhóm truy cập nhanh để tạo phiếu nhập, phiếu xuất, thêm sản phẩm hoặc mở danh sách sản phẩm mà không phải đi qua nhiều menu.'),
                 ),
+                array('sourceSections' => array('3. Quản lý giao dịch', '4. Kho hàng'))
             ),
-            'product_list' => array(
-                'title' => 'Quản lý sản phẩm',
-                'summary' => 'Trang sản phẩm dùng để tra cứu hàng hóa, lọc theo danh mục/NCC, import Excel, theo dõi HSD và xử lý mã định danh.',
-                'quick_questions' => array('Nhập sản phẩm từ Excel ở đâu?', 'Lọc theo danh mục thế nào?', 'Theo dõi HSD là gì?'),
-                'steps' => array(
-                    self::step('.products-v2-page h4, .categories-v2-page h4', 'Tiêu đề nghiệp vụ', 'Xác nhận bạn đang ở đúng màn hình sản phẩm hoặc danh mục trước khi thao tác dữ liệu hàng hóa.', 'bottom', 'start'),
-                    self::step('.products-v2-page .dropdown, .categories-v2-page .btn', 'Nhóm thao tác dữ liệu', 'Các nút nhập/xuất Excel, cập nhật giá, cập nhật barcode và thao tác hàng loạt nằm ở khu vực đầu trang.', 'bottom', 'end'),
-                    self::step('.tgs-stats-row', 'Thống kê nhanh', 'Các thẻ này cho biết tổng sản phẩm, sản phẩm hoạt động, tạm dừng và tổng tồn. Có thể dùng để lọc nhanh.', 'bottom', 'center'),
-                    self::step('#categorySidebar', 'Lọc theo danh mục/NCC', 'Dùng cây danh mục và bộ lọc nhà cung cấp để thu hẹp danh sách sản phẩm cần xử lý.', 'right', 'start'),
-                    self::step('#productsSmartSearchBlock', 'Tìm sản phẩm trong trang', 'Ô tìm kiếm thông minh giúp lọc theo tên, mã, barcode hoặc thông tin liên quan trong danh sách sản phẩm.', 'bottom', 'center'),
-                    self::step('#productsV2Table, #categoriesV2Table', 'Bảng dữ liệu chính', 'Bảng này là nơi kiểm tra thông tin và mở các thao tác sửa, trạng thái, giá hoặc chi tiết sản phẩm/danh mục.', 'top', 'center'),
+
+            'product_list' => self::guide(
+                'Quản lý sản phẩm',
+                'Trang danh sách sản phẩm dùng để tra cứu hàng hóa, lọc danh mục/NCC, import Excel, theo dõi HSD và quản lý mã định danh.',
+                array('Nhập sản phẩm từ Excel ở đâu?', 'Lọc theo danh mục thế nào?', 'Theo dõi HSD là gì?'),
+                array(
+                    self::step('.products-v2-page h4, h4:has(.text-muted), h4', 'Danh sách sản phẩm', 'Xác nhận đang ở đúng màn hình hàng hóa trước khi lọc, sửa hoặc chạy thao tác hàng loạt.', 'bottom', 'start'),
+                    self::step('.products-v2-page .dropdown, .dt-buttons, .d-flex.gap-2', 'Nhóm thao tác dữ liệu', 'Các nút nhập/xuất Excel, cập nhật giá, cập nhật barcode, ảnh, đơn vị tính và thao tác hàng loạt nằm ở đầu trang.', 'bottom', 'end'),
+                    self::step('.tgs-stats-row, .row .card', 'Thống kê nhanh', 'Theo dõi tổng sản phẩm, trạng thái hoạt động, tạm dừng và tổng tồn để biết tình hình trước khi lọc sâu.', 'bottom', 'center'),
+                    self::step('#categorySidebar, .category-sidebar', 'Lọc danh mục/NCC', 'Dùng cây danh mục và bộ lọc nhà cung cấp để thu hẹp danh sách sản phẩm cần xử lý.', 'right', 'start'),
+                    self::step('#productsSmartSearchBlock, .dataTables_filter, input[type="search"]', 'Tìm sản phẩm trong trang', 'Lọc theo tên, SKU, barcode hoặc thông tin liên quan ngay trong bảng sản phẩm.', 'bottom', 'center'),
+                    self::step('#productsV2Table, table.dataTable', 'Bảng sản phẩm', 'Kiểm tra tồn, giá, HSD, trạng thái và mở thao tác sửa/chi tiết cho từng dòng.', 'top', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('excel', 'import', 'nhap san pham', 'nhap tu excel'), 'Trên trang sản phẩm, mở nhóm "Nhập / Xuất" ở đầu trang rồi chọn chức năng import phù hợp: nhập sản phẩm, danh mục, giá hoặc số lượng.'),
-                    self::knowledge(array('danh muc', 'cay danh muc', 'loc danh muc'), 'Dùng khung "Lọc theo danh mục" bên trái. Khi chọn một node, bảng bên phải chỉ còn sản phẩm hoặc danh mục thuộc nhánh đó.'),
-                    self::knowledge(array('nha cung cap', 'ncc', 'supplier'), 'Nếu trang có danh sách NCC ở sidebar, chọn NCC để xem các sản phẩm đang gắn với nhà cung cấp đó hoặc nhóm chưa có NCC.'),
-                    self::knowledge(array('hsd', 'han su dung', 'tracking'), 'Theo dõi HSD dùng cho sản phẩm cần quản lý hạn sử dụng hoặc mã định danh. Bật/tắt theo dõi phải làm cẩn thận vì ảnh hưởng đến nghiệp vụ nhập, bán và tồn kho.'),
-                    self::knowledge(array('barcode', 'ma dinh danh', 'xoa ma'), 'Các thao tác barcode/mã định danh nằm trong nhóm theo dõi sản phẩm hoặc nhóm thao tác khác. Chỉ dùng khi đã hiểu rõ dữ liệu cần xử lý.'),
+                array(
+                    self::knowledge(array('excel', 'import', 'nhap san pham', 'nhap tu excel'), 'Mở nhóm nhập/xuất ở đầu trang và chọn đúng luồng import: sản phẩm HTSoft, danh mục, giá, số lượng hoặc theo dõi HSD.'),
+                    self::knowledge(array('danh muc', 'cay danh muc', 'loc danh muc'), 'Chọn node trong cây danh mục để bảng chỉ còn các sản phẩm thuộc nhánh đó. Dùng thêm lọc NCC nếu cần thu hẹp nguồn cung.'),
+                    self::knowledge(array('nha cung cap', 'ncc', 'supplier'), 'Lọc theo NCC để biết sản phẩm đang gắn với nhà cung cấp nào hoặc nhóm sản phẩm chưa gắn NCC.'),
+                    self::knowledge(array('hsd', 'han su dung', 'tracking'), 'Theo dõi HSD dùng cho sản phẩm cần quản lý hạn sử dụng/mã định danh. Việc bật/tắt ảnh hưởng tới nhập, bán, hoàn, hủy và báo cáo tồn.'),
+                    self::knowledge(array('barcode', 'ma dinh danh', 'sku'), 'Barcode/SKU là khóa tra cứu quan trọng khi bán hàng, nhập kho và quét mã định danh. Chỉ chạy thao tác hàng loạt khi đã kiểm tra nguồn dữ liệu.'),
                 ),
+                array('sourceSections' => array('1. Quản lý sản phẩm', '14. Xuất nhập Excel'))
             ),
-            'category_list' => array(
-                'title' => 'Quản lý danh mục',
-                'summary' => 'Trang danh mục dùng để chuẩn hóa nhóm hàng, import/export danh mục và thống nhất cây ngành hàng.',
-                'quick_questions' => array('Thêm danh mục ở đâu?', 'Thống nhất danh mục là gì?', 'Lọc cây danh mục thế nào?'),
-                'steps' => array(
-                    self::step('.categories-v2-page h4', 'Danh mục sản phẩm', 'Màn hình này quản lý cây nhóm hàng dùng chung cho lọc sản phẩm, báo cáo và nhập liệu.', 'bottom', 'start'),
-                    self::step('#categorySidebar', 'Cây danh mục', 'Chọn node để xem danh mục con hoặc tìm nhanh nhóm hàng trong cây.', 'right', 'start'),
-                    self::step('#btnUnifyAll', 'Thống nhất danh mục', 'Chức năng chuẩn hóa danh mục, nên dùng khi cần đồng bộ lại cấu trúc nhóm hàng.', 'left', 'center'),
-                    self::step('#categoriesV2Table', 'Bảng danh mục', 'Kiểm tra mã nhóm, tên nhóm, đường dẫn và trạng thái hoạt động của từng danh mục.', 'top', 'center'),
+
+            'product_form' => self::guide(
+                'Thêm/Sửa sản phẩm',
+                'Form sản phẩm chuẩn hóa thông tin hàng hóa, danh mục, đơn vị tính, giá, thuế, ảnh, trạng thái và cấu hình theo dõi HSD.',
+                array('Trường nào bắt buộc?', 'Chọn danh mục sản phẩm ở đâu?', 'Lưu và quay lại khác gì lưu thường?'),
+                array(
+                    self::step('.app-ecommerce h4, h4', 'Thông tin sản phẩm', 'Xác nhận đang thêm mới hay sửa sản phẩm để tránh ghi đè sai dữ liệu hàng hóa.', 'bottom', 'start'),
+                    self::step('.box-product-info, .box-basic-info, form .card:first-of-type', 'Thông tin cơ bản', 'Nhập mã, tên, barcode/SKU và các thông tin nhận diện chính dùng xuyên suốt hệ thống.', 'bottom', 'center'),
+                    self::step('#selectedCategoriesDisplay, #btnOpenCategoryModal, #categoryTreeModal', 'Danh mục sản phẩm', 'Chọn đúng nhóm hàng để lọc, báo cáo và import Excel đồng bộ với dữ liệu HTSoft.', 'right', 'center'),
+                    self::step('#inventoryHelperCard, .box-unit, .box-price, #product_price_after_tax', 'Đơn vị tính và giá', 'Cấu hình đơn vị bán, đơn vị Excel, giá sau thuế/trước thuế và các thông tin phục vụ bán hàng.', 'top', 'center'),
+                    self::step('.box-gallery, #product_gallery, #galleryPreview', 'Ảnh sản phẩm', 'Thêm ảnh đại diện hoặc gallery để dễ nhận diện khi bán hàng và quản lý sản phẩm.', 'top', 'center'),
+                    self::step('.publish-box, #product_status, #btnSave, #btnSaveSticky', 'Trạng thái và lưu', 'Kiểm tra trạng thái hoạt động rồi lưu. Dùng lưu và quay lại khi đã hoàn tất nhập liệu.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('them danh muc', 'tao danh muc'), 'Bấm "Thêm danh mục" ở đầu trang để tạo nhóm hàng mới.'),
-                    self::knowledge(array('thong nhat', 'chuan hoa'), 'Nút "Thống nhất danh mục" dùng khi cần chuẩn hóa lại dữ liệu danh mục. Nên kiểm tra kỹ trước khi chạy trên dữ liệu thật.'),
-                    self::knowledge(array('duong dan', 'path'), 'Cột đường dẫn cho biết vị trí của danh mục trong cây nhóm hàng, giúp tránh nhầm nhóm cha/con.'),
+                array(
+                    self::knowledge(array('bat buoc', 'ma san pham', 'ten san pham', 'sku'), 'Ưu tiên nhập đầy đủ mã/SKU, tên sản phẩm, barcode nếu có, danh mục, đơn vị tính và giá. Đây là dữ liệu nền cho nhập kho, bán hàng và báo cáo.'),
+                    self::knowledge(array('danh muc', 'chon danh muc'), 'Bấm nút chọn danh mục để mở cây danh mục, tích đúng nhóm hàng rồi xác nhận. Danh mục sai sẽ làm lọc và báo cáo bị lệch.'),
+                    self::knowledge(array('don vi tinh', 'quy doi', 'loc', 'thung'), 'Nếu nhập theo thùng/lốc nhưng bán theo hộp, hãy cấu hình đơn vị tính và quy đổi đúng để tồn kho được tính chính xác.'),
+                    self::knowledge(array('gia', 'thue', 'vat'), 'Giá sau thuế, giá trước thuế và VAT cần thống nhất với dữ liệu bán hàng và hóa đơn để tránh sai doanh thu hoặc thuế.'),
+                    self::knowledge(array('luu', 'luu va quay lai'), 'Lưu thường giữ bạn ở form để kiểm tra tiếp; lưu và quay lại dùng khi đã hoàn tất và muốn trở về danh sách.'),
                 ),
+                array('sourceSections' => array('1. Quản lý sản phẩm', '1.4 Cấu hình quy đổi đơn vị tính'))
             ),
-            'ticket_list' => array(
-                'title' => 'Danh sách phiếu giao dịch',
-                'summary' => 'Trang danh sách phiếu dùng để lọc, tìm, kiểm tra trạng thái và mở chi tiết các chứng từ mua, bán, hoàn, hủy, nhập, xuất, thu, chi.',
-                'quick_questions' => array('Lọc phiếu theo ngày thế nào?', 'Thùng rác dùng để làm gì?', 'Làm mới bảng phiếu ở đâu?'),
-                'steps' => array(
-                    self::step('.app-ticket-list h4, .app-ticket-list .card-title', 'Loại phiếu hiện tại', 'Tiêu đề cho biết bạn đang xem danh sách phiếu mua, bán, nhập, xuất, thu, chi hoặc nhóm phiếu khác.', 'bottom', 'start'),
-                    self::step('#trashToggleGroup', 'Trạng thái danh sách', 'Chuyển giữa phiếu đang hoạt động và thùng rác để kiểm tra chứng từ đã xóa tạm.', 'bottom', 'center'),
-                    self::step('#dateQuickFilter', 'Lọc nhanh theo ngày', 'Chọn hôm nay, tuần này, tháng này hoặc tất cả để thu hẹp danh sách phiếu.', 'bottom', 'center'),
-                    self::step('#filterDateFrom', 'Khoảng ngày tùy chọn', 'Dùng ngày bắt đầu/kết thúc khi cần đối soát một giai đoạn cụ thể.', 'top', 'center'),
-                    self::step('#ticketTable', 'Bảng phiếu', 'Bấm vào dòng hoặc nút thao tác trong bảng để mở chi tiết, kiểm tra trạng thái và xử lý tiếp.', 'top', 'center'),
-                    self::step('#btnRefreshTable', 'Làm mới bảng', 'Dùng nút này sau khi tạo, duyệt hoặc cập nhật phiếu ở tab khác.', 'left', 'center'),
+
+            'product_excel_import' => self::guide(
+                'Nhập dữ liệu sản phẩm từ Excel',
+                'Các màn hình import/cập nhật Excel giúp đưa nhanh dữ liệu HTSoft, giá, số lượng, danh mục hoặc trạng thái theo dõi vào hệ thống.',
+                array('Chọn file Excel nào?', 'Import có ghi đè không?', 'Cần kiểm tra gì trước khi chạy?'),
+                array(
+                    self::step('h4, .card-title', 'Đúng loại import', 'Kiểm tra tiêu đề để chắc chắn đang import đúng loại dữ liệu: sản phẩm, danh mục, giá, số lượng hoặc HSD.', 'bottom', 'start'),
+                    self::step('input[type="file"], .dropzone, .file-upload', 'File Excel nguồn', 'Chọn file xuất từ HTSoft hoặc mẫu hệ thống yêu cầu, không trộn sai định dạng giữa các luồng import.', 'bottom', 'center'),
+                    self::step('.alert, .card:has(table), table', 'Kiểm tra dữ liệu xem trước', 'Đọc cảnh báo, cột lỗi và số dòng hợp lệ trước khi xác nhận cập nhật hàng loạt.', 'top', 'center'),
+                    self::step('button[type="submit"], .btn-primary, .btn-success', 'Xác nhận import', 'Chỉ chạy khi đã kiểm tra đúng file, đúng site/shop và hiểu phạm vi cập nhật.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('loc ngay', 'hom nay', 'thang nay', 'tu ngay', 'den ngay'), 'Dùng cụm "Lọc theo ngày" để chọn nhanh hôm nay/tuần/tháng hoặc nhập khoảng ngày rồi bấm "Lọc".'),
-                    self::knowledge(array('thung rac', 'xoa tam'), 'Thùng rác hiển thị các phiếu đã xóa tạm. Đây là nơi kiểm tra trước khi khôi phục hoặc xử lý dữ liệu đã loại khỏi danh sách chính.'),
-                    self::knowledge(array('lam moi bang', 'refresh'), 'Bấm nút biểu tượng làm mới ở góc phải card danh sách để tải lại dữ liệu phiếu.'),
-                    self::knowledge(array('kho duyet', 'cho duyet', 'duyet kho'), 'Nếu màn hình có bộ lọc "Kho duyệt", dùng nó để xem phiếu chờ duyệt, đã duyệt hoặc từ chối.'),
+                array(
+                    self::knowledge(array('file', 'excel', 'htsoft', 'mau'), 'Dùng đúng file Excel theo loại import. File sản phẩm, danh mục, giá và số lượng không nên dùng lẫn vì cột và nghiệp vụ khác nhau.'),
+                    self::knowledge(array('ghi de', 'cap nhat', 'import'), 'Một số luồng import có thể cập nhật dữ liệu đang tồn tại. Hãy đọc phần xem trước/cảnh báo trước khi xác nhận.'),
+                    self::knowledge(array('loi', 'dong loi', 'kiem tra'), 'Nếu có dòng lỗi, xử lý lại file Excel trước khi import để tránh dữ liệu thiếu SKU, sai đơn vị, sai danh mục hoặc sai giá.'),
                 ),
+                array('sourceSections' => array('1.1 Nhập sản phẩm từ Excel HTSoft', '14. Xuất nhập Excel'))
             ),
-            'ticket_create' => array(
-                'title' => 'Tạo phiếu nghiệp vụ',
-                'summary' => 'Trang tạo phiếu gồm thông tin chứng từ, đối tượng liên quan, phân kho, danh sách sản phẩm, import Excel/AI nhận diện và thanh lưu phiếu.',
-                'quick_questions' => array('Tạo phiếu gồm những bước nào?', 'Chọn nhà cung cấp/khách hàng ở đâu?', 'Thêm sản phẩm vào phiếu thế nào?'),
-                'steps' => array(
-                    self::step('#ticketInfoCard', 'Thông tin phiếu', 'Kiểm tra mã phiếu, ngày phiếu, hạn thanh toán, mã chứng từ ngoài hệ thống, phân kho và ghi chú.', 'bottom', 'start'),
-                    self::step('#ticketPersonCard', 'Đối tượng liên quan', 'Chọn khách hàng, nhà cung cấp hoặc chi nhánh tùy loại phiếu. Đây là dữ liệu quan trọng để đối soát.', 'bottom', 'start'),
-                    self::step('#ticket_warehouse_zone', 'Phân kho', 'Nếu nghiệp vụ cần tách khu hàng, chọn phân kho phù hợp để tồn kho và báo cáo rõ ràng hơn.', 'bottom', 'center'),
-                    self::step('#ticketProductListCard', 'Danh sách sản phẩm', 'Thêm hàng hóa vào phiếu, nhập số lượng, giá, VAT, chiết khấu, HSD, mã lô hoặc ghi chú theo từng dòng.', 'top', 'center'),
-                    self::step('#btnTicketExcelImportMain', 'Nhập sản phẩm từ Excel', 'Dùng khi kế toán mua hoặc kho có file danh sách sản phẩm, giúp giảm nhập tay từng dòng.', 'left', 'center'),
-                    self::step('#btnTicketAIImportMain', 'AI nhận diện chứng từ', 'Mở hướng xử lý ảnh/file chứng từ để tự nhận diện sản phẩm, phục vụ mở rộng quy trình AI sau này.', 'left', 'center'),
-                    self::step('#btnTicketSubmit', 'Lưu phiếu', 'Sau khi kiểm tra đối tượng, hàng hóa và tổng tiền, bấm nút này để ghi nhận phiếu.', 'top', 'end'),
+
+            'product_bulk_tools' => self::guide(
+                'Công cụ cập nhật sản phẩm hàng loạt',
+                'Các trang cập nhật thông minh dùng để chuẩn hóa giá, ảnh, barcode, đơn vị tính hoặc gộp file dữ liệu sản phẩm hàng loạt.',
+                array('Công cụ này ảnh hưởng gì?', 'Khi nào nên chạy cập nhật toàn bộ?', 'Cần backup trước không?'),
+                array(
+                    self::step('h4, .card-title', 'Công cụ cập nhật hàng loạt', 'Xác nhận đúng loại cập nhật trước khi chạy vì thao tác có thể ảnh hưởng nhiều sản phẩm.', 'bottom', 'start'),
+                    self::step('.alert, .card-body p, .text-muted', 'Điều kiện và cảnh báo', 'Đọc mô tả để biết công cụ sẽ cập nhật giá, ảnh, barcode hay đơn vị tính theo nguồn nào.', 'bottom', 'center'),
+                    self::step('input[type="file"], table, .card', 'Nguồn dữ liệu/kiểm tra', 'Nếu công cụ có file hoặc bảng xem trước, kiểm tra kỹ dữ liệu trước khi xác nhận.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-danger, button[type="submit"]', 'Chạy cập nhật', 'Chỉ người phụ trách dữ liệu nên chạy thao tác này, nhất là với barcode, giá và đơn vị tính.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('buoc tao phieu', 'quy trinh', 'tao phieu'), 'Quy trình cơ bản: kiểm tra thông tin phiếu, chọn đối tượng, chọn phân kho nếu cần, thêm sản phẩm, kiểm tra tổng tiền rồi bấm lưu phiếu.'),
-                    self::knowledge(array('nha cung cap', 'khach hang', 'doi tuong', 'chon doi tuong'), 'Dùng khối "Thông tin đối tượng" để chọn nhà cung cấp, khách hàng hoặc chi nhánh. Không nên lưu phiếu khi đối tượng bắt buộc còn trống.'),
-                    self::knowledge(array('them san pham', 'hang hoa', 'bang san pham'), 'Bấm "Thêm sản phẩm" trong khối danh sách sản phẩm, hoặc dùng "Nhập từ Excel" nếu có file sẵn.'),
-                    self::knowledge(array('excel', 'nhap tu excel'), 'Bấm "Nhập từ Excel" trong khối danh sách sản phẩm để đưa nhiều dòng hàng vào phiếu nhanh hơn.'),
-                    self::knowledge(array('ai nhan dien', 'anh', 'file chung tu'), 'Nút "AI nhận diện" dành cho luồng đọc ảnh/file chứng từ. Đây là điểm nối tự nhiên để mở rộng AI thực tế trong quy trình mua/bán.'),
-                    self::knowledge(array('phan kho', 'kho chinh', 'kho khuyen mai'), 'Phân kho giúp tách hàng bán, hàng công cụ, hàng khuyến mại hoặc các khu quản lý riêng. Nếu không chắc, hỏi quản lý kho trước khi chọn.'),
-                    self::knowledge(array('luu phieu', 'submit', 'hoan tat'), 'Trước khi lưu phiếu, kiểm tra đối tượng, danh sách sản phẩm, số lượng, giá, VAT/chiết khấu và tổng tiền ở thanh cuối trang.'),
+                array(
+                    self::knowledge(array('anh huong', 'hang loat', 'toan bo'), 'Cập nhật hàng loạt có thể tác động nhiều sản phẩm trong site hiện tại hoặc dữ liệu dùng chung. Kiểm tra phạm vi trước khi chạy.'),
+                    self::knowledge(array('gia', 'barcode', 'don vi', 'anh'), 'Giá, barcode, đơn vị tính và ảnh là dữ liệu vận hành quan trọng; sai một trong các phần này có thể ảnh hưởng bán hàng, nhập kho và đối soát.'),
+                    self::knowledge(array('backup', 'sao luu'), 'Nếu thao tác cập nhật diện rộng và không chắc nguồn dữ liệu, nên có bản sao Excel/backup trước khi chạy để dễ đối chiếu.'),
                 ),
+                array('sourceSections' => array('1. Quản lý sản phẩm', '14. Xuất nhập Excel'))
             ),
-            'transaction_create' => array(
-                'title' => 'Tạo phiếu thu/chi',
-                'summary' => 'Trang này chọn các phiếu còn công nợ, nhập số tiền thu/chi, hình thức thanh toán và ghi nhận giao dịch tiền.',
-                'quick_questions' => array('Chọn phiếu cần thu/chi ở đâu?', 'Nhập số tiền thanh toán thế nào?', 'Duyệt giao dịch ở đâu?'),
-                'steps' => array(
-                    self::step('.app-transaction-create h4', 'Tạo giao dịch tiền', 'Xác nhận bạn đang tạo phiếu thu hoặc phiếu chi đúng nghiệp vụ.', 'bottom', 'start'),
-                    self::step('#sourceTypeTabs', 'Lọc nguồn phiếu', 'Các tab giúp lọc nhóm phiếu đang chờ thu/chi theo nguồn hoặc loại nghiệp vụ.', 'bottom', 'center'),
-                    self::step('#pendingTicketsTable', 'Danh sách phiếu chờ xử lý', 'Chọn phiếu còn công nợ để mở modal nhập số tiền thu/chi.', 'top', 'center'),
-                    self::step('#paymentModal', 'Modal thanh toán', 'Khi chọn phiếu, nhập số tiền, hình thức thanh toán và ghi chú trước khi xác nhận.', 'left', 'center'),
+
+            'product_hsd_bulk' => self::guide(
+                'Bật/Tắt theo dõi HSD hàng loạt',
+                'Trang này dùng để bật hoặc tắt theo dõi hạn sử dụng/mã định danh cho nhiều sản phẩm theo file Excel.',
+                array('Bật theo dõi HSD khi nào?', 'Tắt theo dõi có rủi ro gì?', 'Excel cần cột nào?'),
+                array(
+                    self::step('h4, .card-title', 'Theo dõi HSD hàng loạt', 'Kiểm tra đang bật hay tắt tracking trước khi chọn file.', 'bottom', 'start'),
+                    self::step('input[type="file"], .file-upload', 'File danh sách sản phẩm', 'File nên chứa mã hàng/SKU/barcode đúng để hệ thống xác định sản phẩm cần đổi trạng thái.', 'bottom', 'center'),
+                    self::step('.alert, table', 'Cảnh báo và kết quả dò', 'Đọc kỹ số dòng hợp lệ, dòng không tìm thấy và cảnh báo trước khi xác nhận.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-danger, button[type="submit"]', 'Xác nhận đổi trạng thái', 'Chỉ xác nhận khi chắc chắn sản phẩm thuộc nhóm cần quản lý HSD/mã định danh.', 'left', 'center'),
                 ),
-                'knowledge' => array(
+                array(
+                    self::knowledge(array('bat', 'theo doi', 'hsd'), 'Bật theo dõi HSD cho sản phẩm cần ghi nhận hạn dùng hoặc quản lý từng mã định danh khi nhập, bán, hoàn, hủy.'),
+                    self::knowledge(array('tat', 'rui ro'), 'Tắt theo dõi HSD có thể làm luồng nhập/bán không yêu cầu mã định danh cho sản phẩm đó. Chỉ tắt khi nghiệp vụ đã xác nhận.'),
+                    self::knowledge(array('excel', 'sku', 'barcode'), 'File Excel cần mã nhận diện đủ rõ như SKU/barcode/mã sản phẩm để hệ thống đổi đúng sản phẩm.'),
+                ),
+                array('sourceSections' => array('1.5 Quản lý hạn sử dụng khi nhập hàng'))
+            ),
+
+            'milk_under24m' => self::guide(
+                'Quản lý sản phẩm sữa dưới 24 tháng',
+                'Trang này quản lý danh sách sản phẩm sữa dưới 24 tháng để kiểm soát chính sách khuyến mại và dữ liệu liên quan thuế.',
+                array('Vì sao cần danh sách này?', 'Import danh sách ở đâu?', 'Sản phẩm nào nên đưa vào?'),
+                array(
+                    self::step('h4, .card-title', 'Danh sách sữa dưới 24 tháng', 'Đây là nhóm sản phẩm cần kiểm soát riêng khi áp dụng khuyến mại và truyền dữ liệu hóa đơn.', 'bottom', 'start'),
+                    self::step('a[href*="milk-under24m-import"], .btn, .dt-buttons', 'Nhập/Xuất danh sách', 'Dùng import Excel khi cần cập nhật hàng loạt danh sách sản phẩm thuộc nhóm này.', 'bottom', 'center'),
+                    self::step('table, #milkUnder24mTable, .dataTable', 'Bảng sản phẩm', 'Kiểm tra mã hàng, tên hàng và trạng thái có thuộc nhóm sữa dưới 24 tháng hay không.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('duoi 24', 'sua', 'khuyen mai', 'thue'), 'Danh sách này giúp nhận diện sản phẩm sữa dưới 24 tháng để tránh áp dụng/gửi khuyến mại không phù hợp lên dữ liệu thuế.'),
+                    self::knowledge(array('import', 'excel'), 'Dùng trang import sữa dưới 24 tháng để cập nhật hàng loạt thay vì sửa thủ công từng sản phẩm.'),
+                    self::knowledge(array('san pham nao', 'dua vao'), 'Chỉ đưa sản phẩm thuộc nhóm sữa dưới 24 tháng theo chính sách nội bộ/tuân thủ vào danh sách này.'),
+                ),
+                array('sourceSections' => array('1.2 Quản lý sản phẩm sữa dưới 24 tháng'))
+            ),
+
+            'milk_under24m_import' => self::guide(
+                'Nhập Excel sữa dưới 24 tháng',
+                'Trang import cập nhật nhanh danh sách sản phẩm sữa dưới 24 tháng theo file Excel.',
+                array('File cần chuẩn bị gì?', 'Import xong kiểm tra ở đâu?', 'Sai mã hàng thì sao?'),
+                array_merge($generic_steps, array(
+                    self::step('input[type="file"], .file-upload', 'File danh sách sữa dưới 24 tháng', 'Chọn file Excel chứa mã hàng/SKU/barcode của các sản phẩm cần đánh dấu.', 'bottom', 'center'),
+                    self::step('button[type="submit"], .btn-primary', 'Chạy import', 'Xác nhận sau khi đã kiểm tra đúng file và đúng phạm vi sản phẩm.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('file', 'excel', 'sku', 'barcode'), 'File nên có mã nhận diện sản phẩm rõ ràng như SKU hoặc barcode để hệ thống map đúng sản phẩm.'),
+                    self::knowledge(array('kiem tra', 'sau import'), 'Sau khi import, quay lại danh sách sữa dưới 24 tháng để kiểm tra sản phẩm đã được ghi nhận đúng.'),
+                )),
+                array('sourceSections' => array('1.2 Quản lý sản phẩm sữa dưới 24 tháng'))
+            ),
+
+            'category_list' => self::guide(
+                'Quản lý danh mục sản phẩm',
+                'Trang danh mục chuẩn hóa cây nhóm hàng để lọc sản phẩm, nhập liệu, báo cáo và đồng bộ dữ liệu HTSoft.',
+                array('Thêm danh mục ở đâu?', 'Thống nhất danh mục là gì?', 'Lọc cây danh mục thế nào?'),
+                array(
+                    self::step('.categories-v2-page h4, h4', 'Danh mục sản phẩm', 'Màn hình này quản lý cây nhóm hàng dùng chung cho sản phẩm, nhập liệu và báo cáo.', 'bottom', 'start'),
+                    self::step('#categorySidebar, .category-sidebar', 'Cây danh mục', 'Chọn node để xem danh mục con hoặc tìm nhanh nhóm hàng trong cây.', 'right', 'start'),
+                    self::step('#btnUnifyAll, #btnUnifyCategories, .btn[id*="Unify"]', 'Thống nhất danh mục', 'Dùng để chuẩn hóa dữ liệu danh mục khi cần đồng bộ lại cấu trúc nhóm hàng.', 'left', 'center'),
+                    self::step('#categoriesV2Table, table.dataTable', 'Bảng danh mục', 'Kiểm tra mã nhóm, tên nhóm, đường dẫn, trạng thái và thao tác sửa/xóa.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('them danh muc', 'tao danh muc'), 'Bấm thêm danh mục ở đầu trang để tạo nhóm hàng mới, sau đó nhập mã/tên và chọn danh mục cha nếu có.'),
+                    self::knowledge(array('thong nhat', 'chuan hoa'), 'Thống nhất danh mục dùng khi cần chuẩn hóa lại cấu trúc nhóm hàng. Nên kiểm tra kỹ trước khi chạy trên dữ liệu thật.'),
+                    self::knowledge(array('duong dan', 'path', 'cha con'), 'Đường dẫn cho biết vị trí danh mục trong cây cha/con, giúp tránh nhầm nhóm khi lọc sản phẩm hoặc báo cáo.'),
+                ),
+                array('sourceSections' => array('1.3 Quản lý danh mục sản phẩm'))
+            ),
+
+            'category_form' => self::guide(
+                'Thêm/Sửa danh mục',
+                'Form danh mục dùng để tạo hoặc cập nhật mã nhóm, tên nhóm, danh mục cha, trạng thái và ghi chú.',
+                array('Mã danh mục nhập thế nào?', 'Chọn danh mục cha ở đâu?', 'Trạng thái hoạt động ảnh hưởng gì?'),
+                array(
+                    self::step('.app-ecommerce h4, h4', 'Form danh mục', 'Xác nhận đang thêm mới hay sửa danh mục trước khi lưu.', 'bottom', 'start'),
+                    self::step('.box-category-info, #category_code, #category_name', 'Thông tin danh mục', 'Nhập mã danh mục, tên hiển thị và ghi chú nếu cần để nhân viên dễ nhận diện.', 'bottom', 'center'),
+                    self::step('.box-parent-category, #btnOpenParentModal, #parentCategoryModal', 'Danh mục cha', 'Chọn nhóm cha để đặt đúng vị trí trong cây danh mục.', 'right', 'center'),
+                    self::step('.publish-box, #category_status, #btnPublish, #btnSaveSticky', 'Trạng thái và lưu', 'Kiểm tra trạng thái hoạt động trước khi lưu để danh mục xuất hiện đúng trong lọc và nhập liệu.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('ma danh muc', 'code'), 'Mã danh mục nên ổn định và dễ đối chiếu với nguồn HTSoft hoặc quy ước nội bộ.'),
+                    self::knowledge(array('danh muc cha', 'parent'), 'Chọn danh mục cha nếu nhóm này nằm dưới một nhóm lớn hơn. Nếu để trống, danh mục sẽ là nhóm gốc.'),
+                    self::knowledge(array('trang thai', 'hoat dong'), 'Danh mục tắt hoạt động có thể không còn xuất hiện trong một số bộ lọc hoặc form chọn danh mục.'),
+                ),
+                array('sourceSections' => array('1.3 Quản lý danh mục sản phẩm'))
+            ),
+
+            'category_import' => self::guide(
+                'Nhập danh mục từ Excel',
+                'Trang import danh mục giúp đưa nhanh cây nhóm hàng từ Excel/HTSoft vào hệ thống.',
+                array('File danh mục cần cột nào?', 'Import danh mục có tạo nhóm cha không?', 'Lỗi path xử lý thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('input[type="file"], .file-upload', 'File Excel danh mục', 'Chọn đúng file danh mục, không dùng file sản phẩm hoặc file giá.', 'bottom', 'center'),
+                    self::step('table, .alert', 'Xem trước lỗi import', 'Kiểm tra mã danh mục, tên nhóm, path cha/con và dòng lỗi trước khi xác nhận.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('path', 'cha con', 'parent'), 'Nếu file có path cha/con, kiểm tra đúng dấu phân cấp để tránh tạo cây danh mục sai.'),
+                    self::knowledge(array('loi', 'dong loi'), 'Dòng lỗi thường do thiếu mã, sai path hoặc trùng dữ liệu. Sửa file rồi import lại để tránh cây danh mục bị lệch.'),
+                )),
+                array('sourceSections' => array('1.3 Quản lý danh mục sản phẩm', '14. Xuất nhập Excel'))
+            ),
+
+            'partner_list' => self::guide(
+                'Quản lý đối tác',
+                'Trang đối tác dùng chung cho khách hàng, nhà cung cấp và các dữ liệu liên hệ phục vụ bán hàng, mua hàng và đối soát.',
+                array('Tìm đối tác thế nào?', 'Nhập Excel ở đâu?', 'Chi tiết đối tác xem ở đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('.app-user-list h4, h4', 'Danh sách đối tác', 'Xác nhận đang xem khách hàng, liên hệ hay nhà cung cấp.', 'bottom', 'start'),
+                    self::step('.app-user-list .dt-buttons, .app-user-list .d-flex.gap-2', 'Thao tác đầu trang', 'Các nút thêm mới, import/export Excel, đồng bộ hoặc thao tác hàng loạt nằm ở khu vực này.', 'bottom', 'end'),
+                    self::step('#contactsTable, #suppliersTable, table.dataTable', 'Bảng đối tác', 'Tìm kiếm, kiểm tra trạng thái và mở chi tiết đối tác từ bảng chính.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('khach hang', 'lien he', 'tim khach'), 'Dùng ô tìm kiếm của bảng để tra theo tên, email hoặc số điện thoại khách hàng/liên hệ.'),
+                    self::knowledge(array('nha cung cap', 'supplier', 'ncc'), 'Nhà cung cấp là dữ liệu nền cho phiếu mua, kế hoạch mua và cấu hình mặt hàng theo NCC.'),
+                    self::knowledge(array('excel', 'xuat excel', 'nhap excel'), 'Dùng nhập/xuất Excel khi cần cập nhật danh sách đối tác hàng loạt hoặc gửi dữ liệu cho bộ phận khác.'),
+                )),
+                array('sourceSections' => array('2. Quản lý đối tác', '14. Xuất nhập Excel'))
+            ),
+
+            'contact_list' => self::guide(
+                'Danh sách khách hàng/liên hệ',
+                'Trang này quản lý khách hàng, người dùng/liên hệ, trạng thái và dữ liệu phục vụ bán hàng, chăm sóc khách hàng, báo cáo.',
+                array('Thêm khách hàng ở đâu?', 'Tìm khách bằng số điện thoại thế nào?', 'Thùng rác dùng để làm gì?'),
+                array(
+                    self::step('.app-user-list h4, h4', 'Danh sách liên hệ', 'Kiểm tra đúng danh sách đang hoạt động hay thùng rác trước khi thao tác.', 'bottom', 'start'),
+                    self::step('.dt-buttons, .tgs-um-btn-add, .tgs-um-btn-import, .tgs-um-btn-export', 'Thêm/Import/Export', 'Thêm người dùng, nhập khách hàng từ Excel, xuất dữ liệu hoặc chọn thao tác hàng loạt.', 'bottom', 'center'),
+                    self::step('#contactsTable, table.dataTable', 'Bảng khách hàng', 'Tra cứu theo tên, email, số điện thoại, loại khách và trạng thái.', 'top', 'center'),
+                    self::step('.btn-edit-user, .btn-delete-user, .btn-restore-user, .btn-toggle-status', 'Thao tác từng dòng', 'Mở chi tiết, sửa nhanh, khóa/mở hoặc chuyển khách vào thùng rác.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('them', 'them khach', 'them nguoi dung'), 'Bấm nút thêm người dùng/khách hàng ở đầu bảng để tạo mới. Nhập tên, số điện thoại, email và trạng thái phù hợp.'),
+                    self::knowledge(array('so dien thoai', 'tim khach', 'email'), 'Dùng ô tìm kiếm của DataTable để tra theo số điện thoại, email hoặc tên khách hàng.'),
+                    self::knowledge(array('thung rac', 'xoa', 'khoi phuc'), 'Thùng rác chứa dữ liệu đã xóa tạm. Có thể khôi phục nếu chuyển nhầm, trước khi xóa vĩnh viễn nếu hệ thống có hỗ trợ.'),
+                ),
+                array('sourceSections' => array('2.1 Khách hàng'))
+            ),
+
+            'contact_detail' => self::guide(
+                'Chi tiết khách hàng/liên hệ',
+                'Trang chi tiết lưu thông tin cá nhân, đơn hàng, hoạt động, bảo mật và trạng thái của khách hàng/người dùng.',
+                array('Sửa thông tin cá nhân ở đâu?', 'Xem lịch sử đơn hàng thế nào?', 'Vai trò và trạng thái ảnh hưởng gì?'),
+                array(
+                    self::step('.app-user-view h4, h4', 'Chi tiết liên hệ', 'Kiểm tra đúng người dùng/khách hàng trước khi cập nhật thông tin.', 'bottom', 'start'),
+                    self::step('.nav-pills, .nav-tabs', 'Các tab thông tin', 'Chuyển giữa thông tin cá nhân, đơn hàng, hoạt động và bảo mật.', 'bottom', 'center'),
+                    self::step('#formAccountSettings, form', 'Form thông tin cá nhân', 'Cập nhật họ tên, email, số điện thoại, địa chỉ, vai trò và trạng thái.', 'top', 'center'),
+                    self::step('#tab-orders, table', 'Lịch sử giao dịch', 'Xem các đơn/phiếu liên quan để đối chiếu hoạt động của khách.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('sua thong tin', 'ca nhan'), 'Mở tab thông tin cá nhân, chỉnh các trường cần thiết rồi lưu thay đổi.'),
+                    self::knowledge(array('don hang', 'lich su'), 'Tab đơn hàng/hoạt động dùng để xem giao dịch hoặc lịch sử liên quan tới khách hàng.'),
+                    self::knowledge(array('vai tro', 'trang thai', 'khoa'), 'Vai trò và trạng thái quyết định quyền truy cập hoặc khả năng hoạt động của người dùng trong hệ thống.'),
+                ),
+                array('sourceSections' => array('2.1 Khách hàng'))
+            ),
+
+            'customer_import' => self::guide(
+                'Nhập khách hàng từ Excel',
+                'Trang import khách hàng giúp cập nhật danh sách khách/liên hệ hàng loạt phục vụ POS, chăm sóc khách hàng và báo cáo.',
+                array('File khách hàng cần gì?', 'Trùng số điện thoại xử lý sao?', 'Import xong xem ở đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('input[type="file"], .file-upload', 'File khách hàng', 'Chọn file chứa tên, số điện thoại, email và thông tin liên hệ cần đưa vào hệ thống.', 'bottom', 'center'),
+                    self::step('table, .alert', 'Kiểm tra trước import', 'Xem dòng trùng, dòng sai số điện thoại/email và dòng hợp lệ trước khi xác nhận.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('so dien thoai', 'trung'), 'Số điện thoại thường là khóa quan trọng để nhận diện khách. Kiểm tra kỹ dòng trùng trước khi import.'),
+                    self::knowledge(array('xem o dau', 'sau import'), 'Sau khi import, quay lại danh sách liên hệ để tìm và kiểm tra khách hàng vừa nhập.'),
+                )),
+                array('sourceSections' => array('2.1 Khách hàng', '14. Xuất nhập Excel'))
+            ),
+
+            'supplier_list' => self::guide(
+                'Danh sách nhà cung cấp',
+                'Trang nhà cung cấp quản lý đối tác mua hàng và làm nền cho phiếu mua, hợp đồng, chính sách và cấu hình mặt hàng theo NCC.',
+                array('Thêm nhà cung cấp ở đâu?', 'Xuất danh sách NCC thế nào?', 'Sản phẩm của NCC xem ở đâu?'),
+                array(
+                    self::step('.app-user-list h4, h4', 'Danh sách nhà cung cấp', 'Xem toàn bộ NCC đang hợp tác hoặc ngừng hợp tác.', 'bottom', 'start'),
+                    self::step('#btnExportExcel, a[href*="suppliers-excel-import"], .btn-primary', 'Thêm/Import/Export NCC', 'Thêm NCC mới, nhập từ Excel hoặc xuất danh sách để đối chiếu.', 'bottom', 'center'),
+                    self::step('#suppliersTable, table.dataTable', 'Bảng NCC', 'Kiểm tra tên, mã, liên hệ, trạng thái và mở trang chi tiết để cấu hình sâu hơn.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('them nha cung cap', 'them ncc'), 'Bấm "Thêm nhà cung cấp" để tạo NCC mới, nhập thông tin liên hệ và trạng thái hợp tác.'),
+                    self::knowledge(array('xuat excel', 'export'), 'Dùng nút xuất Excel để lấy danh sách NCC ra ngoài phục vụ đối chiếu hoặc cập nhật hàng loạt.'),
+                    self::knowledge(array('mat hang', 'san pham ncc', 'cung cap'), 'Mối quan hệ sản phẩm - NCC giúp bộ phận mua hàng biết mặt hàng nào thuộc nhà cung cấp nào và giảm nhầm khi lập phiếu mua.'),
+                ),
+                array('sourceSections' => array('2.2 Nhà cung cấp', '7. Lô mua và hợp đồng'))
+            ),
+
+            'supplier_detail' => self::guide(
+                'Chi tiết nhà cung cấp',
+                'Trang chi tiết NCC dùng để cập nhật thông tin liên hệ, trạng thái hợp tác và các thông tin phục vụ mua hàng.',
+                array('Sửa thông tin NCC ở đâu?', 'Cấu hình sản phẩm NCC thế nào?', 'Khi nào ngừng hợp tác?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .card', 'Thông tin NCC', 'Cập nhật mã/tên NCC, liên hệ, địa chỉ, ghi chú và trạng thái.', 'top', 'center'),
+                    self::step('table, .nav-tabs, .card-datatable', 'Dữ liệu liên quan', 'Nếu trang có tab sản phẩm/hợp đồng, dùng để xem các dữ liệu mua hàng gắn với NCC.', 'top', 'center'),
+                    self::step('#btnSave, button[type="submit"], .btn-success', 'Lưu thông tin', 'Lưu sau khi kiểm tra đúng NCC và dữ liệu liên hệ.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('sua', 'thong tin ncc'), 'Cập nhật thông tin NCC trong form chi tiết rồi lưu. Dữ liệu này được dùng khi tạo phiếu mua và đối chiếu công nợ.'),
+                    self::knowledge(array('san pham', 'mat hang'), 'Nếu có vùng cấu hình mặt hàng, hãy gắn đúng sản phẩm với NCC để hỗ trợ lập kế hoạch mua hàng.'),
+                )),
+                array('sourceSections' => array('2.2 Nhà cung cấp'))
+            ),
+
+            'supplier_import' => self::guide(
+                'Nhập nhà cung cấp từ Excel',
+                'Trang import NCC cập nhật hàng loạt thông tin nhà cung cấp từ file Excel.',
+                array('File NCC cần cột nào?', 'Trùng NCC xử lý sao?', 'Import xong kiểm tra đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('input[type="file"], .file-upload', 'File Excel NCC', 'Chọn file chứa mã/tên NCC, liên hệ, điện thoại, địa chỉ và trạng thái nếu có.', 'bottom', 'center'),
+                    self::step('table, .alert', 'Xem trước import', 'Kiểm tra dòng trùng, dòng thiếu dữ liệu và dòng hợp lệ trước khi cập nhật.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('trung', 'ma ncc', 'ten ncc'), 'Nếu file có NCC trùng, kiểm tra quy tắc cập nhật/ghi đè trước khi import.'),
+                    self::knowledge(array('kiem tra', 'sau import'), 'Sau import, quay lại danh sách nhà cung cấp để tìm theo mã/tên và kiểm tra trạng thái.'),
+                )),
+                array('sourceSections' => array('2.2 Nhà cung cấp', '14. Xuất nhập Excel'))
+            ),
+
+            'supplier_migration' => self::guide(
+                'Đồng bộ dữ liệu nhà cung cấp',
+                'Trang này phục vụ chuyển đổi/đồng bộ dữ liệu NCC giữa cấu trúc cũ và danh sách NCC dùng chung.',
+                array('Khi nào chạy đồng bộ NCC?', 'Cần kiểm tra gì trước khi chạy?', 'Đồng bộ ảnh hưởng phiếu không?'),
+                array_merge($generic_steps, array(
+                    self::step('.alert, .card-body p', 'Cảnh báo đồng bộ', 'Đọc mô tả để hiểu nguồn và đích dữ liệu trước khi chạy.', 'bottom', 'center'),
+                    self::step('table, .card', 'Kết quả rà soát', 'Kiểm tra số lượng NCC, dữ liệu trùng và các lỗi cần xử lý.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-warning, button[type="submit"]', 'Chạy đồng bộ', 'Chỉ admin hoặc người phụ trách dữ liệu NCC nên chạy thao tác này.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('dong bo', 'migration'), 'Đồng bộ NCC dùng khi cần đưa dữ liệu cũ sang bảng NCC dùng chung hoặc chuẩn hóa lại dữ liệu nhà cung cấp.'),
+                    self::knowledge(array('anh huong', 'phieu'), 'NCC liên quan tới phiếu mua, phiếu trả NCC, hợp đồng và công nợ; kiểm tra kỹ trước khi chạy đồng bộ diện rộng.'),
+                )),
+                array('sourceSections' => array('2.2 Nhà cung cấp'))
+            ),
+
+            'ticket_relationships' => self::guide(
+                'Sổ nhật ký quan hệ phiếu',
+                'Trang này giúp xem mối liên hệ giữa phiếu gốc và phiếu phát sinh như thu/chi, nhập/xuất, hoàn, hủy, trả NCC.',
+                array('Quan hệ phiếu nghĩa là gì?', 'Tìm phiếu gốc ở đâu?', 'Dùng khi đối soát thế nào?'),
+                array(
+                    self::step('.ticket-relationship-page h4, h4', 'Sổ nhật ký phiếu', 'Dùng để hiểu chuỗi chứng từ phát sinh từ một nghiệp vụ.', 'bottom', 'start'),
+                    self::step('input[type="search"], .dataTables_filter, form', 'Tìm/lọc phiếu', 'Tra theo mã phiếu, loại phiếu hoặc khoảng thời gian để tìm đúng chuỗi nghiệp vụ.', 'bottom', 'center'),
+                    self::step('table, #relationshipTable, .card-datatable', 'Bảng quan hệ', 'Xem phiếu cha, phiếu con, loại quan hệ, trạng thái và đường dẫn chi tiết.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('quan he', 'phieu goc', 'phieu con'), 'Quan hệ phiếu cho biết chứng từ nào sinh ra từ chứng từ nào, ví dụ phiếu bán sinh phiếu xuất và phiếu thu.'),
+                    self::knowledge(array('doi soat', 'lich su'), 'Khi số liệu lệch, mở sổ nhật ký để lần theo phiếu gốc, phiếu liên quan và trạng thái duyệt/xử lý.'),
+                ),
+                array('sourceSections' => array('3. Quản lý giao dịch'))
+            ),
+
+            'ticket_list' => self::guide(
+                'Danh sách phiếu giao dịch',
+                'Trang danh sách phiếu dùng để lọc, tìm, kiểm tra trạng thái và mở chi tiết các chứng từ mua, bán, hoàn, hủy, nhập, xuất, thu, chi, điều chỉnh.',
+                array('Lọc phiếu theo ngày thế nào?', 'Thùng rác dùng để làm gì?', 'Làm mới bảng phiếu ở đâu?'),
+                array(
+                    self::step('.app-ticket-list h4, .app-ticket-list .card-title, h4', 'Loại phiếu hiện tại', 'Tiêu đề cho biết đang xem phiếu mua, bán, hoàn, hủy, nhập, xuất, thu, chi hay điều chỉnh.', 'bottom', 'start'),
+                    self::step('#trashToggleGroup, #btnShowActive, #btnShowTrash', 'Danh sách và thùng rác', 'Chuyển giữa phiếu đang hoạt động và phiếu đã xóa tạm để kiểm tra hoặc khôi phục.', 'bottom', 'center'),
+                    self::step('#filterWarehouseStatus, #filterDebtStatus, #filterPaymentMethod, .app-ticket-list select', 'Bộ lọc nghiệp vụ', 'Lọc theo trạng thái kho, công nợ, hình thức thanh toán hoặc trạng thái phù hợp từng loại phiếu.', 'bottom', 'center'),
+                    self::step('#dateQuickFilter, #filterDateFrom, #filterDateTo', 'Lọc nhanh theo ngày', 'Chọn hôm nay, tuần, tháng, quý, năm hoặc nhập khoảng ngày tùy chỉnh rồi áp dụng lọc.', 'bottom', 'center'),
+                    self::step('#btnRefreshTable, .btn[id*="Refresh"]', 'Làm mới bảng', 'Tải lại danh sách sau khi vừa tạo, duyệt, xóa hoặc cập nhật phiếu.', 'left', 'center'),
+                    self::step('#ticketTable, table.dataTable', 'Bảng phiếu', 'Mở chi tiết, kiểm tra mã chứng từ, đối tác, tổng tiền, công nợ, trạng thái kho và trạng thái duyệt.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('loc ngay', 'hom nay', 'tuan nay', 'thang nay'), 'Dùng nhóm lọc nhanh ngày hoặc nhập từ ngày/đến ngày rồi bấm lọc để thu hẹp danh sách phiếu.'),
+                    self::knowledge(array('thung rac', 'xoa tam'), 'Thùng rác chứa phiếu đã xóa tạm. Dùng để kiểm tra, khôi phục hoặc đối chiếu khi phiếu biến mất khỏi danh sách hoạt động.'),
+                    self::knowledge(array('lam moi', 'refresh'), 'Bấm nút làm mới để tải lại DataTable sau khi vừa tạo, duyệt hoặc sửa phiếu.'),
+                    self::knowledge(array('cong no', 'da thu', 'da chi', 'debt'), 'Các cột cần thu/cần chi, đã thu/đã chi và còn nợ dùng để theo dõi công nợ phát sinh từ phiếu.'),
+                    self::knowledge(array('nhap kho', 'xuat kho', 'trang thai kho'), 'Trạng thái kho cho biết phiếu đã sinh hoặc hoàn tất chứng từ nhập/xuất liên quan chưa.'),
+                ),
+                array('sourceSections' => array('3. Quản lý giao dịch', '4. Kho hàng'))
+            ),
+
+            'ticket_create' => self::guide(
+                'Tạo phiếu giao dịch',
+                'Form tạo phiếu dùng để lập chứng từ mua, bán, hoàn, trả NCC, hủy hoặc điều chỉnh với thông tin đối tác, sản phẩm, số lượng, phân kho, HSD và thanh toán.',
+                array('Tạo phiếu bắt đầu từ đâu?', 'Thêm sản phẩm vào phiếu thế nào?', 'Khi nào nhập HSD/barcode?'),
+                array(
+                    self::step('.app-ticket-create h4, h4', 'Loại phiếu đang tạo', 'Xác nhận đúng nghiệp vụ: mua, bán, hoàn, trả NCC, hủy hoặc điều chỉnh trước khi nhập dữ liệu.', 'bottom', 'start'),
+                    self::step('#ticketCreateForm, form', 'Form tạo phiếu', 'Toàn bộ thông tin đối tác, chứng từ, sản phẩm, thanh toán và ghi chú được lưu trong form này.', 'top', 'center'),
+                    self::step('#ticketPersonInfo, .ticket-person-info, .ticket-info-card', 'Thông tin đối tác/chứng từ', 'Chọn khách hàng, nhà cung cấp hoặc phiếu gốc tùy loại nghiệp vụ.', 'bottom', 'center'),
+                    self::step('#ticketProductsTableBody, #ticketProductsTable, .ticket-product-list, table', 'Danh sách sản phẩm', 'Thêm sản phẩm, nhập số lượng, giá, chiết khấu, thuế, quà tặng hoặc phân kho nếu có.', 'top', 'center'),
+                    self::step('#btnTicketExcelImportMain, #btnTicketSampleLibraryMain, .btn[id*="Product"], .btn[id*="Excel"]', 'Nhập sản phẩm nhanh', 'Có thể thêm sản phẩm từ modal, Excel hoặc thư viện mẫu nếu nghiệp vụ hỗ trợ.', 'bottom', 'center'),
+                    self::step('.ticket-submit-bar, #btnSubmitTicket, button[type="submit"], .btn-success', 'Kiểm tra và lưu phiếu', 'Trước khi lưu, kiểm tra số lượng, HSD/mã định danh, phân kho, thanh toán và ghi chú.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('bat dau', 'tao phieu'), 'Bắt đầu bằng xác định đúng loại phiếu, chọn đối tác/phiếu gốc nếu cần, sau đó thêm sản phẩm và kiểm tra số lượng, giá, thuế, chiết khấu.'),
+                    self::knowledge(array('them san pham', 'chon san pham', 'excel'), 'Thêm sản phẩm bằng modal chọn sản phẩm, import Excel hoặc thư viện mẫu nếu nút tương ứng xuất hiện trên form.'),
+                    self::knowledge(array('hsd', 'barcode', 'ma dinh danh'), 'Với sản phẩm theo dõi HSD/mã định danh, cần nhập hoặc quét đúng barcode/HSD khi hệ thống yêu cầu để tồn kho và lịch sử mã chính xác.'),
+                    self::knowledge(array('phan kho', 'zone'), 'Chọn phân kho đúng nếu phiếu liên quan hàng bán, hàng công cụ, hàng livestream hoặc khu kho riêng.'),
+                    self::knowledge(array('thanh toan', 'thu', 'chi'), 'Nếu phiếu có tiền, kiểm tra phần thanh toán/công nợ để hệ thống sinh hoặc liên kết phiếu thu/chi đúng nghiệp vụ.'),
+                ),
+                array('sourceSections' => array('3. Quản lý giao dịch', '4.2 Phiếu nhập kho', '4.3 Phiếu xuất kho'))
+            ),
+
+            'transaction_create' => self::guide(
+                'Tạo phiếu thu/chi',
+                'Trang này chọn các phiếu còn công nợ để tạo phiếu thu hoặc phiếu chi theo đúng nguồn nghiệp vụ.',
+                array('Chọn phiếu cần thu/chi ở đâu?', 'Số tiền tối đa là gì?', 'Hình thức thanh toán chọn thế nào?'),
+                array(
+                    self::step('.app-transaction-create h4, h4', 'Tạo phiếu thu/chi', 'Xác nhận đang tạo phiếu thu hay phiếu chi trước khi chọn chứng từ gốc.', 'bottom', 'start'),
+                    self::step('#sourceTypeTabs, .transaction-tabs', 'Tab nguồn phiếu', 'Lọc nhóm phiếu đang chờ thu/chi theo nguồn hoặc loại nghiệp vụ.', 'bottom', 'center'),
+                    self::step('#pendingTicketsTable, table.pending-tickets-table', 'Danh sách phiếu chờ xử lý', 'Chọn phiếu còn công nợ để mở modal nhập số tiền thu/chi.', 'top', 'center'),
+                    self::step('#paymentModal, #paymentForm', 'Modal thanh toán', 'Nhập số tiền, hình thức thanh toán và ghi chú trước khi xác nhận.', 'left', 'center'),
+                    self::step('#paymentTimeline, .ticket-summary-card', 'Lịch sử thanh toán', 'Xem các lần thu/chi trước đó để tránh nhập trùng hoặc vượt số tiền còn lại.', 'top', 'center'),
+                ),
+                array(
                     self::knowledge(array('thu tien', 'chi tien', 'thanh toan'), 'Chọn phiếu trong bảng chờ xử lý, nhập số tiền thu/chi trong modal, chọn hình thức thanh toán rồi xác nhận.'),
-                    self::knowledge(array('cong no', 'debt', 'cho thu', 'cho chi'), 'Bảng chính liệt kê các phiếu còn số tiền cần thu hoặc cần chi. Dùng tab để lọc đúng nhóm.'),
-                    self::knowledge(array('hinh thuc thanh toan', 'tien mat', 'chuyen khoan'), 'Trong modal thanh toán, chọn hình thức thanh toán như tiền mặt, chuyển khoản hoặc hình thức khác để đối soát chính xác.'),
+                    self::knowledge(array('cong no', 'debt', 'cho thu', 'cho chi'), 'Bảng chính liệt kê các phiếu còn số tiền cần thu hoặc cần chi. Dùng tab nguồn để lọc đúng nhóm.'),
+                    self::knowledge(array('toi da', 'so tien'), 'Số tiền tối đa thường là phần công nợ còn lại của phiếu gốc sau khi trừ các lần thu/chi đã ghi nhận.'),
+                    self::knowledge(array('hinh thuc thanh toan', 'tien mat', 'chuyen khoan'), 'Chọn đúng tiền mặt, chuyển khoản hoặc hình thức khác để kế toán đối soát chính xác.'),
                 ),
+                array('sourceSections' => array('3.3 Phiếu thu, phiếu chi'))
             ),
-            'inventory_report' => array(
-                'title' => 'Báo cáo tồn kho',
-                'summary' => 'Trang tồn kho cho biết tồn đầu kỳ, nhập trong kỳ, xuất trong kỳ, tồn cuối kỳ và chi tiết theo sản phẩm.',
-                'quick_questions' => array('Chọn kỳ báo cáo thế nào?', 'Tồn đầu kỳ và tồn cuối kỳ nghĩa là gì?', 'Xuất báo cáo Excel ở đâu?'),
-                'steps' => array(
-                    self::step('.app-ecommerce-inventory h4', 'Báo cáo tồn kho', 'Dùng màn hình này để theo dõi biến động nhập xuất tồn theo kỳ.', 'bottom', 'start'),
-                    self::step('.period-filter', 'Kỳ báo cáo', 'Chọn tháng, quý hoặc năm rồi bấm áp dụng để tải số liệu đúng kỳ.', 'bottom', 'center'),
+
+            'ticket_detail' => self::guide(
+                'Chi tiết phiếu giao dịch',
+                'Trang chi tiết phiếu dùng để kiểm tra thông tin chứng từ, sản phẩm, mã định danh, phân kho, quan hệ phiếu, duyệt, in và xuất Excel.',
+                array('Xem sản phẩm trong phiếu ở đâu?', 'Duyệt/từ chối phiếu thế nào?', 'Đổi phân kho trong phiếu ở đâu?'),
+                array(
+                    self::step('.app-ticket-detail h4, h4', 'Chi tiết phiếu', 'Kiểm tra mã phiếu, loại phiếu, trạng thái và đối tác trước khi thao tác.', 'bottom', 'start'),
+                    self::step('#ticketInfoCard, .ticket-info-card, .card:has(#btnEditNote)', 'Thông tin chứng từ', 'Xem mã chứng từ, đối tác, ghi chú, trạng thái, phân kho và các thông tin tổng quan.', 'bottom', 'center'),
+                    self::step('#ticketWarehouseZoneView, #btnEditTicketWarehouseZone', 'Phân kho của phiếu', 'Đổi phân kho cho các dòng sản phẩm nếu cần tách hàng bán, công cụ, livestream hoặc khu kho khác.', 'right', 'center'),
+                    self::step('#ticketProductsTable, #ticketProductsTableBody, table', 'Sản phẩm trong phiếu', 'Kiểm tra từng dòng sản phẩm, số lượng, giá, HSD/mã định danh và dữ liệu liên quan.', 'top', 'center'),
+                    self::step('#lotCodesModal, #btnPrintAllTrackedIdentifiers, #btnGenerateBlankCodes, #btnSmartScanExcel', 'Mã định danh/HSD', 'Quản lý mã định danh, in barcode, sinh mã trống hoặc quét Excel khi phiếu có sản phẩm tracking.', 'left', 'center'),
+                    self::step('#stepFlowCard, #btnToggleSidebar, #btnOpenSidebarHeader', 'Trình tự và duyệt phiếu', 'Theo dõi trạng thái xử lý, lịch sử, duyệt hoặc từ chối theo luồng nghiệp vụ.', 'left', 'center'),
+                    self::step('#btnTicketFileLibrary, #btnTicketDocLibrary, #btnPrintRelatedTickets, #btnTicketExportExcel', 'File, in và xuất dữ liệu', 'Mở thư viện chứng từ, in phiếu liên quan hoặc xuất danh sách sản phẩm ra Excel/CSV.', 'bottom', 'center'),
+                ),
+                array(
+                    self::knowledge(array('san pham', 'dong hang', 'chi tiet hang'), 'Bảng sản phẩm trong phiếu hiển thị từng dòng hàng, số lượng, giá, thuế/chiết khấu và mã định danh nếu có.'),
+                    self::knowledge(array('duyet', 'tu choi', 'approve', 'reject'), 'Dùng khu vực trình tự/duyệt phiếu để duyệt hoặc từ chối. Đọc trạng thái hiện tại trước khi thao tác vì duyệt có thể ảnh hưởng kho/công nợ.'),
+                    self::knowledge(array('phan kho', 'doi phan kho'), 'Bấm nút sửa phân kho trong khối thông tin phiếu để đổi phân kho cho các dòng sản phẩm, sau đó xác nhận theo cảnh báo.'),
+                    self::knowledge(array('ma dinh danh', 'barcode', 'hsd', 'lot'), 'Mở modal mã định danh từ dòng sản phẩm để xem/in/sửa mã, HSD, lô hoặc gán mã khi nghiệp vụ yêu cầu.'),
+                    self::knowledge(array('in', 'xuat excel', 'file chung tu'), 'Dùng các nút file/in/xuất Excel ở đầu trang để lấy chứng từ ra ngoài hoặc kiểm tra tài liệu đã upload.'),
+                ),
+                array('sourceSections' => array('3. Quản lý giao dịch', '4. Kho hàng'))
+            ),
+
+            'ticket_edit' => self::guide(
+                'Sửa phiếu giao dịch',
+                'Trang sửa phiếu cho phép điều chỉnh chứng từ khi phiếu còn đủ điều kiện sửa, thường trước khi các phiếu kho liên quan đã duyệt.',
+                array('Khi nào được sửa phiếu?', 'Sửa sản phẩm ở đâu?', 'Sửa xong cần kiểm tra gì?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .app-ticket-create, .app-ticket-detail', 'Form sửa phiếu', 'Kiểm tra điều kiện sửa, thông tin đối tác, sản phẩm và trạng thái phiếu trước khi lưu.', 'top', 'center'),
+                    self::step('table, #ticketProductsTable, #ticketProductsTableBody', 'Dòng sản phẩm', 'Điều chỉnh sản phẩm, số lượng, giá hoặc dữ liệu liên quan nếu phiếu cho phép.', 'top', 'center'),
+                    self::step('button[type="submit"], #btnSubmitTicket, .btn-success', 'Lưu thay đổi', 'Lưu xong nên quay lại chi tiết phiếu để đối chiếu trạng thái, quan hệ phiếu và số liệu kho/công nợ.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('duoc sua', 'dieu kien'), 'Thường chỉ sửa khi phiếu liên quan chưa duyệt hoặc chưa khóa nghiệp vụ. Nếu nút sửa bị vô hiệu, kiểm tra trạng thái kho/duyệt.'),
+                    self::knowledge(array('sua san pham', 'so luong', 'gia'), 'Sửa dòng sản phẩm trong bảng sản phẩm của phiếu, sau đó kiểm tra tổng tiền, thuế, chiết khấu và công nợ.'),
+                )),
+                array('sourceSections' => array('3. Quản lý giao dịch'))
+            ),
+
+            'inventory_report' => self::guide(
+                'Báo cáo tồn kho',
+                'Trang tồn kho cho biết tồn đầu kỳ, nhập trong kỳ, xuất trong kỳ, tồn cuối kỳ và chi tiết theo sản phẩm.',
+                array('Chọn kỳ báo cáo thế nào?', 'Tồn đầu kỳ và tồn cuối kỳ nghĩa là gì?', 'Xuất báo cáo Excel ở đâu?'),
+                array(
+                    self::step('.app-ecommerce-inventory h4, h4', 'Báo cáo tồn kho', 'Dùng màn hình này để theo dõi biến động nhập - xuất - tồn theo kỳ.', 'bottom', 'start'),
+                    self::step('.period-filter, #filterPeriodType, #filterPeriodValue, #filterPeriodYear', 'Kỳ báo cáo', 'Chọn tháng, quý hoặc năm rồi áp dụng để tải số liệu đúng kỳ.', 'bottom', 'center'),
                     self::step('.stat-card.opening', 'Tồn đầu kỳ', 'Số lượng và giá trị tồn trước khi phát sinh nhập/xuất trong kỳ đã chọn.', 'bottom', 'center'),
                     self::step('.stat-card.import', 'Nhập trong kỳ', 'Tổng hàng đi vào kho hoặc shop trong kỳ báo cáo.', 'bottom', 'center'),
                     self::step('.stat-card.export', 'Xuất trong kỳ', 'Tổng hàng đi ra khỏi kho hoặc shop trong kỳ báo cáo.', 'bottom', 'center'),
                     self::step('.stat-card.closing', 'Tồn cuối kỳ', 'Số tồn còn lại sau khi tính nhập và xuất trong kỳ.', 'bottom', 'center'),
-                    self::step('#inventoryTable', 'Bảng tồn theo sản phẩm', 'Kiểm tra từng sản phẩm, số lượng, giá trị và mở chi tiết nếu cần đối soát.', 'top', 'center'),
-                    self::step('#btnExportExcel', 'Xuất Excel', 'Tải báo cáo ra file để gửi quản lý, kế toán hoặc lưu hồ sơ đối chiếu.', 'left', 'center'),
+                    self::step('#inventoryTable, table.inventory-table', 'Bảng tồn theo sản phẩm', 'Kiểm tra từng sản phẩm, số lượng, giá trị và mở chi tiết nếu cần đối soát.', 'top', 'center'),
+                    self::step('#btnExportExcel, #btnPrint', 'Xuất/In báo cáo', 'Tải báo cáo ra Excel hoặc in để gửi quản lý, kế toán hoặc lưu hồ sơ đối chiếu.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('ky bao cao', 'thang', 'quy', 'nam'), 'Chọn loại kỳ báo cáo, giá trị kỳ và năm trong khối "Kỳ báo cáo", sau đó bấm "Áp dụng".'),
+                array(
+                    self::knowledge(array('ky bao cao', 'thang', 'quy', 'nam'), 'Chọn loại kỳ, giá trị kỳ và năm trong khối kỳ báo cáo, sau đó bấm áp dụng để tải lại số liệu.'),
                     self::knowledge(array('ton dau ky', 'ton cuoi ky'), 'Tồn đầu kỳ là số tồn trước kỳ báo cáo; tồn cuối kỳ là số còn lại sau nhập và xuất trong kỳ.'),
-                    self::knowledge(array('nhap trong ky', 'xuat trong ky'), 'Nhập trong kỳ là hàng tăng; xuất trong kỳ là hàng giảm. Hai chỉ số này giải thích biến động tồn.'),
-                    self::knowledge(array('excel', 'xuat bao cao', 'in bao cao'), 'Dùng nút "Xuất Excel" hoặc "In báo cáo" ở đầu trang để lấy báo cáo ra ngoài hệ thống.'),
+                    self::knowledge(array('nhap trong ky', 'xuat trong ky'), 'Nhập trong kỳ làm tăng tồn; xuất trong kỳ làm giảm tồn. Hai chỉ số này giải thích biến động tồn.'),
+                    self::knowledge(array('excel', 'xuat bao cao', 'in bao cao'), 'Dùng nút xuất Excel hoặc in báo cáo ở đầu trang để lấy báo cáo ra ngoài hệ thống.'),
                 ),
+                array('sourceSections' => array('4. Kho hàng', '15. Nhóm báo cáo'))
             ),
-            'warehouse_zone' => array(
-                'title' => 'Quản lý phân kho',
-                'summary' => 'Trang phân kho tạo các khu quản lý hàng như kho chính, hàng khuyến mại, công cụ hoặc hàng livestream.',
-                'quick_questions' => array('Phân kho dùng để làm gì?', 'Độ ưu tiên là gì?', 'Thêm phân kho ở đâu?'),
-                'steps' => array(
+
+            'inventory_print' => self::guide(
+                'In báo cáo tồn kho',
+                'Trang in báo cáo tồn kho dùng để xem bản in của số liệu tồn đã lọc trước đó.',
+                array('In báo cáo ở đâu?', 'Số liệu lấy từ kỳ nào?', 'Quay lại báo cáo thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('.print-toolbar, #btnPrint, button[onclick*="print"], .btn-primary', 'Nút in', 'Dùng để mở hộp thoại in của trình duyệt sau khi kiểm tra bản xem trước.', 'bottom', 'center'),
+                    self::step('table, .report-print, .card', 'Bản in tồn kho', 'Kiểm tra kỳ báo cáo, sản phẩm, số lượng và giá trị trước khi in.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('in', 'print'), 'Kiểm tra bản xem trước rồi bấm in để mở hộp thoại in của trình duyệt.'),
+                    self::knowledge(array('ky nao', 'so lieu'), 'Số liệu bản in phụ thuộc bộ lọc/kỳ báo cáo đã chọn trước đó hoặc tham số trên URL.'),
+                )),
+                array('sourceSections' => array('4. Kho hàng', '15. Nhóm báo cáo'))
+            ),
+
+            'inventory_manual' => self::guide(
+                'Tồn kho tự điền',
+                'Trang tồn kho tự điền dùng để rà soát/cập nhật số lượng tồn thủ công trong các tình huống cần điều chỉnh dữ liệu.',
+                array('Khi nào dùng tồn tự điền?', 'Cập nhật tồn có ảnh hưởng gì?', 'Cần kiểm tra sản phẩm nào?'),
+                array_merge($generic_steps, array(
+                    self::step('table, #inventoryManualTable, .dataTable', 'Bảng tồn tự điền', 'Tìm sản phẩm và kiểm tra số lượng hiện tại trước khi cập nhật thủ công.', 'top', 'center'),
+                    self::step('input[type="number"], .form-control', 'Số lượng tồn', 'Nhập số lượng đúng theo kiểm kê thực tế hoặc nguồn đối soát đã xác nhận.', 'bottom', 'center'),
+                    self::step('.btn-success, .btn-primary, button[type="submit"]', 'Lưu cập nhật', 'Chỉ lưu khi đã đối chiếu vì dữ liệu tồn ảnh hưởng báo cáo và thao tác nhập/xuất sau này.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('khi nao', 'tu dien', 'thu cong'), 'Dùng tồn tự điền khi cần cập nhật theo kiểm kê thực tế hoặc xử lý dữ liệu lệch sau đối soát.'),
+                    self::knowledge(array('anh huong', 'bao cao', 'ton kho'), 'Cập nhật tồn thủ công ảnh hưởng báo cáo tồn và có thể ảnh hưởng các quyết định mua/cấp hàng. Hãy ghi chú hoặc lưu nguồn đối soát.'),
+                )),
+                array('sourceSections' => array('4. Kho hàng'))
+            ),
+
+            'warehouse_zone' => self::guide(
+                'Quản lý phân kho',
+                'Trang phân kho tạo các khu quản lý hàng như kho chính, hàng khuyến mại, công cụ hoặc hàng livestream.',
+                array('Phân kho dùng để làm gì?', 'Độ ưu tiên là gì?', 'Thêm phân kho ở đâu?'),
+                array(
+                    self::step('.container-xxl h4, h4', 'Quản lý phân kho', 'Phân kho giúp tách hàng theo mục đích sử dụng hoặc khu vực vận hành.', 'bottom', 'start'),
                     self::step('#btnAddZone', 'Thêm phân kho', 'Tạo mã phân kho mới để dùng khi lập phiếu hoặc tách khu hàng.', 'left', 'center'),
                     self::step('#warehouseZoneTable', 'Danh sách phân kho', 'Bảng hiển thị mã phân kho, tên gợi nhớ, độ ưu tiên và nút sửa/xóa.', 'top', 'center'),
                     self::step('#zoneModal', 'Form phân kho', 'Khi thêm hoặc sửa, nhập mã, tên gợi nhớ và độ ưu tiên rồi lưu.', 'left', 'center'),
                 ),
-                'knowledge' => array(
+                array(
                     self::knowledge(array('phan kho', 'kho chinh', 'khu hang'), 'Phân kho giúp tách hàng hóa theo mục đích quản lý, ví dụ kho chính, hàng khuyến mại, hàng công cụ hoặc hàng livestream.'),
                     self::knowledge(array('do uu tien', 'sort order', 'mac dinh'), 'Độ ưu tiên càng cao thì phân kho càng được ưu tiên khi hệ thống cần chọn mặc định.'),
                     self::knowledge(array('them phan kho', 'tao phan kho'), 'Bấm "Thêm phân kho", nhập mã phân kho, tên gợi nhớ và độ ưu tiên rồi lưu.'),
                 ),
+                array('sourceSections' => array('4.4 Quản lý phân kho'))
             ),
-            'partner_list' => array(
-                'title' => 'Quản lý đối tác',
-                'summary' => 'Trang đối tác quản lý khách hàng, nhà cung cấp và thông tin liên hệ phục vụ bán hàng, mua hàng và đối soát.',
-                'quick_questions' => array('Thêm nhà cung cấp ở đâu?', 'Xuất danh sách đối tác thế nào?', 'Tìm khách hàng ở đâu?'),
-                'steps' => array(
-                    self::step('.app-user-list h4', 'Danh sách đối tác', 'Xác nhận nhóm dữ liệu đang xem: khách hàng, người dùng hoặc nhà cung cấp.', 'bottom', 'start'),
-                    self::step('.app-user-list .d-flex.gap-2', 'Thao tác đầu trang', 'Các nút đồng bộ, nhập Excel, xuất Excel hoặc thêm mới nằm ở khu vực này.', 'bottom', 'end'),
-                    self::step('#contactsTable, #suppliersTable', 'Bảng đối tác', 'Dùng bảng để tìm kiếm, kiểm tra trạng thái và mở chi tiết đối tác.', 'top', 'center'),
-                    self::step('.nav-tabs', 'Tab trạng thái', 'Nếu có tab danh sách/thùng rác, dùng để chuyển giữa dữ liệu đang hoạt động và dữ liệu đã xóa tạm.', 'bottom', 'center'),
+
+            'lot_tracking' => self::guide(
+                'Tra cứu mã định danh',
+                'Trang này dùng để quét hoặc nhập barcode, xem trạng thái sản phẩm, lịch sử phiếu liên quan và thao tác hoàn/hủy nhanh khi phù hợp.',
+                array('Quét barcode ở đâu?', 'Phiếu liên quan nghĩa là gì?', 'Khi nào dùng hoàn/hủy nhanh?'),
+                array(
+                    self::step('#guideSection, h4, .card-title', 'Hướng dẫn tra cứu', 'Màn hình ưu tiên thao tác quét barcode cho nhân viên kho hoặc cửa hàng.', 'bottom', 'center'),
+                    self::step('#lotBarcodeInput, input[name*="barcode"], input[type="search"]', 'Ô quét barcode', 'Đặt con trỏ vào đây rồi quét mã hoặc nhập barcode thủ công để tra cứu.', 'bottom', 'center'),
+                    self::step('#resultSection, .result-section, .card:has(#ledgersContainer)', 'Kết quả tra cứu', 'Sau khi tìm thấy mã, khu vực này hiển thị thông tin sản phẩm, trạng thái và lịch sử.', 'top', 'center'),
+                    self::step('#ledgersContainer, .ledger-list, table', 'Phiếu liên quan', 'Danh sách chứng từ đã tác động đến mã định danh này.', 'top', 'center'),
+                    self::step('#quickDamageBtn, #quickReturnBtn, .quick-action', 'Thao tác nhanh', 'Khi điều kiện phù hợp, hệ thống hiện nút hủy hàng hoặc hoàn hàng để xử lý nhanh.', 'left', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('nha cung cap', 'supplier', 'them nha cung cap'), 'Ở trang nhà cung cấp, bấm "Thêm nhà cung cấp" để tạo mới hoặc mở chi tiết để sửa thông tin.'),
-                    self::knowledge(array('khach hang', 'lien he', 'tim khach'), 'Ở trang khách hàng/người dùng, dùng ô tìm kiếm của bảng để tra theo tên, email hoặc số điện thoại.'),
-                    self::knowledge(array('excel', 'xuat excel', 'nhap excel'), 'Các nút nhập/xuất Excel nằm ở khu vực đầu trang, dùng khi cần đồng bộ danh sách đối tác hàng loạt.'),
-                ),
-            ),
-            'lot_tracking' => array(
-                'title' => 'Tra cứu mã định danh',
-                'summary' => 'Trang này dùng để quét hoặc nhập barcode, xem trạng thái sản phẩm, lịch sử phiếu liên quan và thao tác hoàn/hủy nhanh khi phù hợp.',
-                'quick_questions' => array('Quét barcode ở đâu?', 'Phiếu liên quan nghĩa là gì?', 'Khi nào dùng hoàn/hủy nhanh?'),
-                'steps' => array(
-                    self::step('#guideSection', 'Hướng dẫn tra cứu', 'Màn hình này ưu tiên thao tác quét barcode cho nhân viên kho hoặc cửa hàng.', 'bottom', 'center'),
-                    self::step('#lotBarcodeInput', 'Ô quét barcode', 'Đặt con trỏ vào đây rồi quét mã hoặc nhập barcode thủ công để tra cứu.', 'bottom', 'center'),
-                    self::step('#resultSection', 'Kết quả tra cứu', 'Sau khi tìm thấy mã, khu vực này hiển thị thông tin sản phẩm, trạng thái và lịch sử.', 'top', 'center'),
-                    self::step('#ledgersContainer', 'Phiếu liên quan', 'Danh sách các chứng từ đã tác động đến mã định danh này.', 'top', 'center'),
-                    self::step('#quickDamageBtn, #quickReturnBtn', 'Thao tác nhanh', 'Khi điều kiện phù hợp, hệ thống hiện nút hủy hàng hoặc hoàn hàng để xử lý nhanh.', 'left', 'center'),
-                ),
-                'knowledge' => array(
+                array(
                     self::knowledge(array('barcode', 'quet ma', 'ma dinh danh'), 'Đặt con trỏ ở ô barcode, quét mã trên sản phẩm hoặc nhập tay rồi chờ hệ thống trả kết quả.'),
                     self::knowledge(array('phieu lien quan', 'lich su'), 'Phiếu liên quan là lịch sử chứng từ đã làm thay đổi trạng thái hoặc vị trí của mã định danh.'),
                     self::knowledge(array('hoan hang', 'huy hang', 'thao tac nhanh'), 'Chỉ dùng hoàn/hủy nhanh khi đã kiểm tra đúng sản phẩm, đúng trạng thái và đúng nghiệp vụ cần xử lý.'),
                 ),
+                array('sourceSections' => array('1.5 Quản lý hạn sử dụng', '4. Kho hàng'))
             ),
-            'settings' => array(
-                'title' => 'Cài đặt hệ thống',
-                'summary' => 'Trang cài đặt kiểm soát các feature nhạy cảm theo từng website chi nhánh trong multisite.',
-                'quick_questions' => array('Bật/tắt tính năng có ảnh hưởng gì?', 'Cài đặt lưu theo shop nào?', 'Ai nên dùng trang này?'),
-                'steps' => array(
-                    self::step('.admin-settings-page h4', 'Cài đặt đặc biệt', 'Trang này dành cho admin hoặc quản lý có quyền cấu hình nghiệp vụ.', 'bottom', 'start'),
-                    self::step('.admin-settings-page .alert-warning', 'Lưu ý trước khi đổi cài đặt', 'Đọc cảnh báo trước khi bật/tắt feature vì thay đổi có thể ảnh hưởng thao tác của nhân viên.', 'bottom', 'center'),
-                    self::step('.feature-toggle', 'Công tắc tính năng', 'Mỗi công tắc bật/tắt một luồng nghiệp vụ cụ thể và thường lưu riêng theo website hiện tại.', 'left', 'center'),
+
+            'identifier_generate' => self::guide(
+                'Chi tiết phiếu sinh mã định danh',
+                'Trang này kiểm tra phiếu sinh mã trống/định danh ngược và các mã đã tạo cho sản phẩm tracking.',
+                array('Phiếu sinh mã dùng khi nào?', 'Xem mã đã tạo ở đâu?', 'Cần gán mã thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('table, #lotCodesTable, .card-datatable', 'Danh sách mã', 'Kiểm tra các mã định danh đã sinh, trạng thái và sản phẩm liên quan.', 'top', 'center'),
+                    self::step('.btn, button', 'Thao tác mã', 'In, gán, chọn hoặc cập nhật mã tùy trạng thái phiếu.', 'bottom', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('sinh ma', 'ma trong', 'dinh danh nguoc'), 'Phiếu sinh mã dùng khi cần tạo mã định danh trước hoặc xử lý hàng tracking chưa có mã đầy đủ.'),
+                    self::knowledge(array('gan ma', 'barcode'), 'Gán mã cần đúng sản phẩm và đúng phiếu liên quan để lịch sử mã không bị lệch.'),
+                )),
+                array('sourceSections' => array('1.5 Quản lý hạn sử dụng'))
+            ),
+
+            'reports_overview' => self::guide(
+                'Nhóm báo cáo trong TGS Shop',
+                'Trang báo cáo tổng hợp các nhóm báo cáo phục vụ điều hành, tồn kho, bán hàng, doanh thu, khách hàng và hàng sắp hết hạn.',
+                array('Có những nhóm báo cáo nào?', 'Báo cáo tồn kho ở đâu?', 'Xuất Excel báo cáo thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('.tgs-report-card, .card, .list-group', 'Nhóm báo cáo', 'Chọn đúng nhóm báo cáo theo nhu cầu: tồn kho, bán hàng, doanh thu, khách hàng, công nợ hoặc mua hàng.', 'bottom', 'center'),
+                    self::step('a[href*="report-"], a[href*="inventory"], .tgs-report-list a', 'Mở báo cáo chi tiết', 'Bấm tên báo cáo để mở màn hình lọc và xem dữ liệu chi tiết.', 'right', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('nhom bao cao', 'bao cao nao'), 'Các nhóm chính gồm điều hành, tồn kho, bán hàng, doanh thu, khách hàng, công nợ, mua hàng và hàng sắp hết hạn.'),
+                    self::knowledge(array('ton kho', 'hang sap het han'), 'Báo cáo tồn kho và hàng sắp hết hạn phục vụ quản lý kho, kế hoạch xử lý hàng và điều phối bán hàng.'),
+                    self::knowledge(array('excel', 'xuat'), 'Trong báo cáo chi tiết thường có nút xuất Excel sau khi chọn bộ lọc.'),
+                )),
+                array('sourceSections' => array('15. Nhóm báo cáo trong phạm vi note'))
+            ),
+
+            'report_dashboard' => self::guide(
+                'Dashboard báo cáo',
+                'Dashboard báo cáo là nơi chọn nhanh các báo cáo theo nhóm nghiệp vụ.',
+                array('Mở báo cáo chi tiết ở đâu?', 'Nhóm báo cáo nghĩa là gì?', 'Báo cáo nào liên quan tồn kho?'),
+                array(
+                    self::step('.tgs-report-dashboard, .wrap', 'Dashboard báo cáo', 'Các báo cáo được gom theo nhóm để nhân sự chọn đúng nhu cầu điều hành.', 'bottom', 'center'),
+                    self::step('.tgs-report-card', 'Thẻ nhóm báo cáo', 'Mỗi thẻ là một nhóm như bán hàng, tồn kho, công nợ, mua hàng hoặc tài chính.', 'bottom', 'center'),
+                    self::step('.tgs-report-list a', 'Liên kết báo cáo', 'Bấm tên báo cáo để mở view chi tiết có bộ lọc và bảng dữ liệu.', 'right', 'center'),
                 ),
-                'knowledge' => array(
+                array(
+                    self::knowledge(array('mo bao cao', 'chi tiet'), 'Bấm tên báo cáo trong thẻ nhóm để mở màn hình chi tiết.'),
+                    self::knowledge(array('nhom', 'group'), 'Nhóm báo cáo giúp phân loại theo nghiệp vụ để tìm nhanh báo cáo cần dùng.'),
+                ),
+                array('sourceSections' => array('15. Nhóm báo cáo'))
+            ),
+
+            'report_detail' => self::guide(
+                'Báo cáo chi tiết',
+                'Trang báo cáo chi tiết dùng bộ lọc ngày, chi nhánh, sản phẩm/danh mục và bảng dữ liệu để xuất báo cáo vận hành.',
+                array('Chọn khoảng ngày ở đâu?', 'Xuất Excel thế nào?', 'Báo cáo này đọc ra sao?'),
+                array(
+                    self::step('.tgs-report-wrapper, .wrap, h1, h2, h4', 'Báo cáo đang mở', 'Đọc tiêu đề để xác định báo cáo thuộc bán hàng, tồn kho, mua hàng, công nợ hay doanh thu.', 'bottom', 'start'),
+                    self::step('#from_date, #to_date, .tgs-report-datepicker', 'Khoảng thời gian', 'Chọn từ ngày/đến ngày để giới hạn dữ liệu báo cáo.', 'bottom', 'center'),
+                    self::step('.tgs-branch-selector, .tgs-category-selector, .tgs-product-selector, select, form', 'Bộ lọc báo cáo', 'Chọn chi nhánh, danh mục, sản phẩm hoặc bộ lọc riêng của báo cáo trước khi xem dữ liệu.', 'bottom', 'center'),
+                    self::step('#tgs-report-table, table', 'Bảng kết quả', 'Đọc các cột số liệu chính, mở chi tiết nếu báo cáo có hỗ trợ drill-down.', 'top', 'center'),
+                    self::step('.dt-buttons, .button-primary, button[name*="export"], a[href*="export"]', 'Xuất báo cáo', 'Sau khi lọc đúng, xuất Excel/CSV/PDF hoặc in nếu báo cáo hỗ trợ.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('ngay', 'tu ngay', 'den ngay'), 'Chọn từ ngày và đến ngày trước khi chạy báo cáo để số liệu đúng phạm vi cần đối chiếu.'),
+                    self::knowledge(array('chi nhanh', 'shop', 'branch'), 'Nếu có bộ lọc chi nhánh, chọn đúng shop/kho hoặc toàn hệ thống tùy nhu cầu quản lý.'),
+                    self::knowledge(array('excel', 'xuat', 'export'), 'Dùng nút xuất sau khi đã lọc đúng dữ liệu. File xuất phản ánh bộ lọc hiện tại.'),
+                    self::knowledge(array('doc bao cao', 'so lieu'), 'Đọc tiêu đề, bộ lọc đang áp dụng, sau đó đối chiếu các cột chính trong bảng. Với báo cáo có chi tiết, bấm dòng/nút chi tiết để xem sâu.'),
+                ),
+                array('sourceSections' => array('15. Nhóm báo cáo', '14. Xuất nhập Excel'))
+            ),
+
+            'storekeeper_report' => self::guide(
+                'Báo cáo thủ kho',
+                'Báo cáo thủ kho tập trung vào số liệu tồn và lịch sử nhập/xuất phục vụ nhân viên kho đối soát hàng ngày.',
+                array('Báo cáo thủ kho dùng để làm gì?', 'Lọc sản phẩm/chi nhánh ở đâu?', 'Xem lịch sử dòng thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .tgs-ssr-filter, .card', 'Bộ lọc thủ kho', 'Chọn chi nhánh, ngày, sản phẩm hoặc trạng thái cần kiểm tra.', 'bottom', 'center'),
+                    self::step('table, #tgsSsrTable', 'Bảng tồn thủ kho', 'Đọc số lượng, chênh lệch hoặc tình trạng hàng để xử lý tại kho.', 'top', 'center'),
+                    self::step('.btn, button[data-row], .tgs-ssr-history', 'Lịch sử dòng', 'Mở lịch sử để xem phát sinh nhập/xuất liên quan tới dòng hàng.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('thu kho', 'doi soat'), 'Báo cáo thủ kho giúp nhân viên kho đối soát tồn và phát sinh nhập/xuất theo sản phẩm hoặc chi nhánh.'),
+                    self::knowledge(array('lich su', 'row history'), 'Mở lịch sử dòng để xem các phát sinh làm thay đổi tồn của sản phẩm.'),
+                )),
+                array('sourceSections' => array('4. Kho hàng', '15. Nhóm báo cáo'))
+            ),
+
+            'settings' => self::guide(
+                'Cài đặt hệ thống',
+                'Trang cài đặt kiểm soát các feature nhạy cảm theo từng website chi nhánh trong multisite.',
+                array('Bật/tắt tính năng có ảnh hưởng gì?', 'Cài đặt lưu theo shop nào?', 'Ai nên dùng trang này?'),
+                array(
+                    self::step('.admin-settings-page h4, h4', 'Cài đặt đặc biệt', 'Trang này dành cho admin hoặc quản lý có quyền cấu hình nghiệp vụ.', 'bottom', 'start'),
+                    self::step('.admin-settings-page .alert-warning, .alert', 'Lưu ý trước khi đổi cài đặt', 'Đọc cảnh báo trước khi bật/tắt feature vì có thể ảnh hưởng thao tác của nhân viên.', 'bottom', 'center'),
+                    self::step('.feature-toggle, input[type="checkbox"], .form-switch', 'Công tắc tính năng', 'Mỗi công tắc bật/tắt một luồng nghiệp vụ và thường lưu riêng theo website hiện tại.', 'left', 'center'),
+                ),
+                array(
                     self::knowledge(array('bat tat', 'toggle', 'feature'), 'Các công tắc tính năng nên do admin hoặc quản lý phụ trách. Khi tắt, nhân viên có thể không dùng được chức năng tương ứng.'),
                     self::knowledge(array('multisite', 'shop', 'website chi nhanh'), 'Phần lớn cài đặt ở đây lưu theo website chi nhánh hiện tại, phù hợp mô hình multisite nhiều cửa hàng.'),
                     self::knowledge(array('quyen', 'admin'), 'Trang cài đặt dành cho người có quyền quản trị. Nhân viên thường không nên tự thay đổi các công tắc này.'),
                 ),
+                array('sourceSections' => array('11. Phân quyền menu', '13. Cài đặt thương hiệu'))
             ),
-            'api' => array(
-                'title' => 'Quản lý API',
-                'summary' => 'Trang API phục vụ kiểm tra cấu hình tích hợp và kết nối hệ thống bên ngoài.',
-                'quick_questions' => array('API dùng để làm gì?', 'Ai nên cấu hình API?', 'Kiểm tra kết nối ở đâu?'),
-                'steps' => array(
-                    self::step('.card, table', 'Thông tin API', 'Khu vực này chứa danh sách endpoint, cấu hình hoặc chi tiết kết nối tùy màn hình API hiện tại.', 'bottom', 'center'),
+
+            'label_print_settings' => self::guide(
+                'Cấu hình in tem',
+                'Trang cấu hình in tem dùng để thiết lập khổ giấy, số tem mỗi dòng, kích thước tem, khoảng cách, cỡ chữ, barcode và profile dùng chung.',
+                array('Số tem mỗi dòng là gì?', 'Xem trước tem ở đâu?', 'Lưu profile in tem thế nào?'),
+                array(
+                    self::step('#tgs-label-print-settings, h4, h5', 'Cấu hình in tem', 'Thiết lập này ảnh hưởng cách tem/barcode được in cho sản phẩm.', 'bottom', 'start'),
+                    self::step('#lbl_labels_per_row, #lbl_paper_width, #lbl_label_height', 'Khổ giấy và kích thước tem', 'Chọn số tem mỗi dòng, chiều rộng giấy và chiều cao tem theo máy in thực tế.', 'bottom', 'center'),
+                    self::step('#lbl_padding_top, #lbl_gap_horizontal, #lbl_gap_vertical', 'Padding và khoảng cách', 'Điều chỉnh lề và khoảng cách để tem không bị lệch khi in.', 'bottom', 'center'),
+                    self::step('#lbl_font_size_name, #lbl_font_size_info, #lbl_barcode_height', 'Chữ và barcode', 'Cấu hình cỡ chữ tên sản phẩm, thông tin phụ và chiều cao barcode.', 'bottom', 'center'),
+                    self::step('#labelPreviewContainer', 'Xem trước bố cục tem', 'Kiểm tra trực quan bố cục tem trước khi lưu hoặc in thử.', 'top', 'center'),
+                    self::step('#profileManageTable, #btnSaveCurrentProfile, #btnSaveAsNewProfile', 'Profile cấu hình', 'Lưu cấu hình hiện tại, tạo profile mới hoặc áp dụng profile cho website.', 'top', 'center'),
                 ),
-                'knowledge' => array(
-                    self::knowledge(array('api', 'ket noi', 'tich hop'), 'API dùng cho luồng tích hợp với hệ thống khác. Chỉ người phụ trách kỹ thuật hoặc quản trị nên chỉnh sửa cấu hình API.'),
+                array(
+                    self::knowledge(array('so tem moi dong', 'labels per row'), 'Số tem mỗi dòng là số ô tem nằm ngang trên một hàng giấy. Chọn theo khổ giấy và máy in đang dùng.'),
+                    self::knowledge(array('xem truoc', 'preview'), 'Khung xem trước bố cục tem thay đổi theo cấu hình khổ giấy, khoảng cách và cỡ chữ để bạn kiểm tra trước khi lưu.'),
+                    self::knowledge(array('profile', 'luu cau hinh'), 'Dùng profile để lưu nhiều bộ cấu hình in tem và áp dụng cho từng website/chi nhánh khi dùng máy in khác nhau.'),
                 ),
+                array('sourceSections' => array('12. Cấu hình in tem'))
             ),
-            'guide_settings' => array(
-                'title' => 'Cấu hình AI hướng dẫn',
-                'summary' => 'Trang này cho biết plugin hướng dẫn đang hoạt động, các nhóm tour đã có và cách mở rộng thêm hướng dẫn.',
-                'quick_questions' => array('Reset hướng dẫn thế nào?', 'Thêm tour mới ở đâu?', 'Nối AI thật bằng cách nào?'),
-                'steps' => array(
-                    self::step('.tgs-ai-guides-admin', 'Trung tâm hướng dẫn', 'Trang này giúp đội triển khai kiểm tra coverage và reset trạng thái hướng dẫn khi cần đào tạo lại.', 'bottom', 'center'),
-                    self::step('[data-tgs-ai-reset-site]', 'Reset hướng dẫn đã xem', 'Dùng nút này để cho tài khoản hiện tại xem lại toàn bộ tour trên website chi nhánh này.', 'left', 'center'),
-                ),
-                'knowledge' => array(
-                    self::knowledge(array('reset', 'xem lai tat ca'), 'Trên trang AI hướng dẫn, bấm nút reset để xóa lịch sử đã xem của tài khoản hiện tại trên website chi nhánh này.'),
-                    self::knowledge(array('them tour', 'mo rong'), 'Lập trình viên có thể mở rộng tour qua filter `tgs_ai_guides_tour` hoặc bổ sung nhóm trong registry của plugin.'),
-                    self::knowledge(array('ai that', 'ket noi ai'), 'Để nối AI thật, hook vào filter `tgs_ai_guides_ai_answer` và trả về mảng `answer`, `matched`, `quickQuestions`.'),
-                ),
+
+            'brand_settings' => self::guide(
+                'Cài đặt thương hiệu và in phiếu',
+                'Trang thương hiệu quản lý logo, tên website và thông tin dùng khi in các phiếu/chứng từ.',
+                array('Logo dùng ở đâu?', 'Thông tin in phiếu gồm gì?', 'Lưu theo site nào?'),
+                array_merge($generic_steps, array(
+                    self::step('input[type="file"], .media-upload, #brand_logo', 'Logo thương hiệu', 'Chọn logo hiển thị trên phiếu in hoặc giao diện liên quan nếu trang hỗ trợ.', 'bottom', 'center'),
+                    self::step('form input, form textarea, .card', 'Thông tin thương hiệu', 'Cập nhật tên website, địa chỉ, thông tin liên hệ hoặc nội dung phục vụ in chứng từ.', 'top', 'center'),
+                    self::step('#btnSave, button[type="submit"], .btn-success', 'Lưu cài đặt', 'Lưu sau khi kiểm tra thông tin sẽ xuất hiện trên phiếu in.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('logo', 'thuong hieu'), 'Logo và tên thương hiệu giúp phiếu in có nhận diện rõ ràng theo đơn vị vận hành.'),
+                    self::knowledge(array('in phieu', 'phieu in'), 'Thông tin in phiếu thường gồm logo, tên website/cửa hàng, địa chỉ, số điện thoại và ghi chú in ấn.'),
+                    self::knowledge(array('site', 'chi nhanh'), 'Cài đặt có thể lưu theo website chi nhánh, nên kiểm tra đúng site trước khi đổi.'),
+                )),
+                array('sourceSections' => array('13. Cài đặt thương hiệu và in phiếu'))
             ),
-            'generic' => array(
-                'title' => 'Màn hình TGS Shop',
-                'summary' => 'Trang này thuộc hệ thống TGS Shop Management. Tour chung sẽ hướng dẫn thanh điều hướng, tìm kiếm, vùng làm việc và AI hỗ trợ.',
-                'quick_questions' => array('Trang này dùng để làm gì?', 'Tôi cần thao tác bắt đầu ở đâu?', 'Làm sao xem lại hướng dẫn?'),
-                'steps' => array(
-                    self::step('h4, .card-title', 'Nội dung chính của trang', 'Đọc tiêu đề và các card chính để xác định nghiệp vụ hiện tại trước khi thao tác.', 'bottom', 'start'),
-                    self::step('.card, table, form', 'Khối thao tác chính', 'Các bảng, form hoặc card trên trang là nơi nhập liệu, kiểm tra hoặc xử lý dữ liệu nghiệp vụ.', 'top', 'center'),
-                ),
-                'knowledge' => array(
-                    self::knowledge(array('bat dau', 'thao tac'), 'Hãy đọc tiêu đề trang, kiểm tra các nút ở đầu trang, sau đó thao tác trong bảng hoặc form chính. Nếu chưa chắc, bấm "Hướng dẫn lại".'),
-                ),
+
+            'sync_data' => self::guide(
+                'Đồng bộ dữ liệu',
+                'Trang đồng bộ dùng để cập nhật sản phẩm hoặc danh mục giữa nguồn dữ liệu và website hiện tại.',
+                array('Khi nào cần đồng bộ?', 'Đồng bộ có ghi đè không?', 'Cần kiểm tra gì sau khi chạy?'),
+                array_merge($generic_steps, array(
+                    self::step('.alert, .card-body p', 'Mô tả đồng bộ', 'Đọc kỹ nguồn, đích và phạm vi dữ liệu trước khi chạy.', 'bottom', 'center'),
+                    self::step('table, .card', 'Kết quả/nhật ký đồng bộ', 'Kiểm tra số lượng bản ghi, lỗi và trạng thái cập nhật.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-warning, button[type="submit"]', 'Chạy đồng bộ', 'Chỉ chạy khi đã chắc chắn đúng dữ liệu nguồn và đúng website.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('dong bo', 'sync'), 'Đồng bộ dùng khi cần cập nhật sản phẩm/danh mục từ nguồn chung hoặc hệ thống khác về site hiện tại.'),
+                    self::knowledge(array('ghi de', 'cap nhat'), 'Một số thao tác đồng bộ có thể cập nhật dữ liệu đã tồn tại. Hãy đọc mô tả/cảnh báo trước khi chạy.'),
+                )),
+                array('sourceSections' => array('1. Quản lý sản phẩm', '14. Xuất nhập Excel'))
             ),
+
+            'api_list' => self::guide(
+                'Quản lý API',
+                'Trang API liệt kê endpoint tích hợp để kỹ thuật kiểm tra kết nối với hệ thống bên ngoài.',
+                array('API dùng để làm gì?', 'Ai nên cấu hình API?', 'Mở chi tiết endpoint ở đâu?'),
+                array(
+                    self::step('.app-api-list h4, h4', 'Danh sách API', 'Màn hình này dành cho quản trị/kỹ thuật khi cần kiểm tra endpoint tích hợp.', 'bottom', 'start'),
+                    self::step('.api-endpoint-card, .card', 'Endpoint API', 'Mỗi thẻ mô tả một API, method, mục đích và đường dẫn chi tiết.', 'bottom', 'center'),
+                    self::step('a[href*="api-detail"], .btn', 'Mở chi tiết API', 'Vào chi tiết để xem tham số, ví dụ request và form test.', 'right', 'center'),
+                ),
+                array(
+                    self::knowledge(array('api', 'ket noi', 'tich hop'), 'API dùng cho luồng tích hợp với hệ thống bên ngoài như POS, đơn hàng, khách hàng hoặc báo cáo.'),
+                    self::knowledge(array('ai nen', 'ky thuat', 'admin'), 'Chỉ người phụ trách kỹ thuật hoặc quản trị nên chỉnh/test API vì có thể tạo dữ liệu thật.'),
+                    self::knowledge(array('chi tiet', 'endpoint'), 'Bấm vào endpoint để xem tài liệu chi tiết, tham số và form test.'),
+                ),
+                array('sourceSections' => array('9. Zalo OA', '10. Hóa đơn Viettel'))
+            ),
+
+            'api_detail' => self::guide(
+                'Chi tiết API',
+                'Trang chi tiết API hiển thị thông tin endpoint, tham số, ví dụ request và form test có thể tạo dữ liệu thật.',
+                array('Copy request mẫu thế nào?', 'Test API có tạo dữ liệu thật không?', 'Tham số bắt buộc xem ở đâu?'),
+                array(
+                    self::step('.app-api-detail h4, h4', 'Chi tiết endpoint', 'Xác nhận đúng API trước khi copy mẫu hoặc test request.', 'bottom', 'start'),
+                    self::step('.table-bordered, table:first-of-type', 'Thông tin cơ bản', 'Xem method, endpoint, quyền truy cập và mô tả nghiệp vụ.', 'bottom', 'center'),
+                    self::step('table.table-striped, .mb-4:has(table)', 'Tham số API', 'Kiểm tra tham số bắt buộc, kiểu dữ liệu, mặc định và mô tả.', 'top', 'center'),
+                    self::step('#exampleTabs, .btn-copy-example, pre code', 'Ví dụ request', 'Chọn ví dụ phù hợp rồi copy vào form test nếu cần.', 'bottom', 'center'),
+                    self::step('#testRequestData, #testPathParam, #btnTestApi', 'Form test API', 'Nhập JSON/query/path param rồi test. Lưu ý một số API sẽ tạo dữ liệu thật trong hệ thống.', 'top', 'center'),
+                    self::step('#testResult, #testResultContent', 'Kết quả test', 'Đọc HTTP status, payload trả về và lỗi để xử lý tích hợp.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('copy', 'mau', 'request'), 'Dùng nút Copy vào Test Form tại ví dụ request để đưa JSON mẫu vào ô test.'),
+                    self::knowledge(array('du lieu that', 'test api'), 'Phần test API có thể gửi request thật và tạo dữ liệu thật. Chỉ test khi đã hiểu endpoint và dữ liệu mẫu.'),
+                    self::knowledge(array('bat buoc', 'parameter', 'tham so'), 'Bảng tham số cho biết trường nào bắt buộc, kiểu dữ liệu và ý nghĩa. Kiểm tra bảng này trước khi gọi API.'),
+                ),
+                array('sourceSections' => array('9. Zalo OA', '10. Hóa đơn Viettel'))
+            ),
+
+            'selling_dashboard' => self::guide(
+                'Dashboard chương trình bán hàng',
+                'Dashboard chính sách bán hàng tổng hợp chương trình khuyến mại, nhóm chương trình và các lối tắt cấu hình POS.',
+                array('Tạo chương trình khuyến mại ở đâu?', 'Xem tất cả chương trình thế nào?', 'Liên quan POS ra sao?'),
+                array_merge($generic_steps, array(
+                    self::step('a[href*="selling-policy-group-detail"], .btn-success', 'Tạo nhóm chương trình', 'Dùng để gom các chương trình khuyến mại theo tháng, chiến dịch hoặc shop.', 'bottom', 'center'),
+                    self::step('a[href*="selling-policies"], .card', 'Xem chương trình', 'Mở danh sách nhóm/chương trình để kiểm tra hoặc chỉnh chính sách bán hàng.', 'right', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('khuyen mai', 'chuong trinh', 'pos'), 'Chương trình bán hàng được cấu hình để POS áp dụng các chính sách như giảm giá, hàng tặng hoặc khai trương shop.'),
+                    self::knowledge(array('tao nhom', 'group'), 'Tạo nhóm chương trình trước nếu cần gom nhiều chính sách theo một đợt triển khai.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS'))
+            ),
+
+            'selling_policy' => self::guide(
+                'Danh sách chương trình bán hàng',
+                'Trang chính sách bán hàng quản lý các nhóm chương trình khuyến mại áp dụng cho POS.',
+                array('Tạo nhóm chương trình thế nào?', 'Mở chi tiết chương trình ở đâu?', 'Có những loại khuyến mại nào?'),
+                array_merge($generic_steps, array(
+                    self::step('a[href*="selling-policy-group-detail"], .btn-success, .btn-primary', 'Tạo nhóm/chương trình', 'Tạo nhóm mới hoặc mở nhóm hiện có để cấu hình chính sách.', 'bottom', 'center'),
+                    self::step('table, .card, .selling-policy-list', 'Danh sách chính sách', 'Xem trạng thái, thời gian, phạm vi áp dụng và mở chi tiết để chỉnh sửa.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('giam gia', 'hang tang', 'khai truong'), 'Các dạng khuyến mại trong phạm vi note gồm giảm giá hàng, hàng tặng và khuyến mại khai trương shop.'),
+                    self::knowledge(array('mo chi tiet', 'sua'), 'Bấm vào nhóm hoặc nút chi tiết để mở màn hình cấu hình từng chương trình.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS'))
+            ),
+
+            'selling_policy_form' => self::guide(
+                'Thêm chương trình khuyến mại',
+                'Form thêm chương trình bán hàng dùng để cấu hình điều kiện, phạm vi áp dụng, sản phẩm, quà tặng hoặc giảm giá cho POS.',
+                array('Bắt đầu tạo chương trình thế nào?', 'Chọn sản phẩm áp dụng ở đâu?', 'Cần kiểm tra gì trước khi lưu?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .selling-policy-form, .card', 'Form chương trình', 'Nhập tên, thời gian, phạm vi shop và loại chính sách trước khi cấu hình chi tiết.', 'top', 'center'),
+                    self::step('table, .product-selector, .scope-selector, select', 'Sản phẩm/phạm vi áp dụng', 'Chọn đúng sản phẩm, danh mục, shop hoặc nhóm khách áp dụng chính sách.', 'top', 'center'),
+                    self::step('.btn-success, .btn-primary, button[type="submit"]', 'Lưu chương trình', 'Kiểm tra điều kiện, thời gian, hàng tặng/giảm giá và phạm vi trước khi lưu.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('bat dau', 'tao chuong trinh'), 'Bắt đầu bằng tên chương trình, thời gian hiệu lực, phạm vi áp dụng và loại khuyến mại.'),
+                    self::knowledge(array('san pham', 'pham vi', 'shop'), 'Chọn đúng sản phẩm/danh mục/shop để POS chỉ áp dụng chính sách cho đúng nhóm hàng và điểm bán.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS'))
+            ),
+
+            'selling_policy_detail' => self::guide(
+                'Chi tiết chương trình khuyến mại',
+                'Trang chi tiết chương trình dùng để kiểm tra, chỉnh sửa, nhân bản hoặc theo dõi chính sách bán hàng đã cấu hình.',
+                array('Sửa chương trình ở đâu?', 'Nhân bản chính sách thế nào?', 'Kiểm tra điều kiện áp dụng ra sao?'),
+                array_merge($generic_steps, array(
+                    self::step('#page-title, h4, h5', 'Chi tiết chương trình', 'Xác nhận đúng chương trình trước khi sửa hoặc nhân bản.', 'bottom', 'start'),
+                    self::step('form, .card', 'Thông tin và điều kiện', 'Kiểm tra thời gian, phạm vi, sản phẩm, điều kiện mua và ưu đãi.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-success, .btn-warning', 'Lưu/Nhân bản/Thao tác', 'Dùng các nút thao tác sau khi đã kiểm tra điều kiện chính sách.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('sua', 'chinh sach'), 'Chỉnh thông tin trong form chi tiết rồi lưu. Kiểm tra kỹ thời gian và phạm vi áp dụng vì POS sẽ dùng dữ liệu này.'),
+                    self::knowledge(array('nhan ban', 'copy'), 'Nếu cần tạo chính sách tương tự, dùng chức năng nhân bản nếu trang hỗ trợ rồi chỉnh phần khác biệt.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS'))
+            ),
+
+            'selling_policy_group' => self::guide(
+                'Nhóm chương trình khuyến mại',
+                'Trang nhóm chương trình gom các chính sách bán hàng theo chiến dịch, tháng hoặc mục tiêu vận hành.',
+                array('Nhóm chương trình dùng để làm gì?', 'Thêm chính sách vào nhóm ở đâu?', 'Xóa nhóm có ảnh hưởng gì?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Nhóm chương trình', 'Kiểm tra tên nhóm, trạng thái và thời gian triển khai.', 'bottom', 'start'),
+                    self::step('table, .card', 'Danh sách chính sách trong nhóm', 'Xem các chương trình thuộc nhóm và mở chi tiết từng chương trình.', 'top', 'center'),
+                    self::step('a[href*="selling-policy-add"], .btn-success, .btn-primary', 'Thêm chương trình', 'Tạo chính sách mới trong nhóm hiện tại.', 'right', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('nhom', 'chien dich'), 'Nhóm chương trình giúp gom nhiều khuyến mại theo một chiến dịch hoặc kỳ vận hành để quản lý dễ hơn.'),
+                    self::knowledge(array('them', 'chinh sach'), 'Dùng nút thêm chương trình trong nhóm để tạo chính sách thuộc nhóm hiện tại.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS'))
+            ),
+
+            'selling_policy_report' => self::guide(
+                'Báo cáo chính sách bán hàng',
+                'Báo cáo chính sách bán hàng giúp xem hiệu quả hoặc trạng thái áp dụng các chương trình khuyến mại.',
+                array('Báo cáo chính sách đọc thế nào?', 'Lọc theo chương trình ở đâu?', 'Xuất dữ liệu thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .card', 'Bộ lọc chính sách', 'Lọc theo thời gian, chương trình, shop hoặc trạng thái nếu báo cáo hỗ trợ.', 'bottom', 'center'),
+                    self::step('table, .dataTable', 'Bảng báo cáo', 'Đọc số liệu áp dụng, hiệu quả và thông tin chương trình.', 'top', 'center'),
+                    self::step('.dt-buttons, .btn, a[href*="export"]', 'Xuất báo cáo', 'Xuất dữ liệu sau khi bộ lọc đã đúng.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('doc bao cao', 'hieu qua'), 'Đọc theo chương trình, thời gian và số liệu áp dụng để đánh giá chính sách bán hàng.'),
+                    self::knowledge(array('xuat', 'excel'), 'Dùng nút xuất nếu cần gửi dữ liệu cho quản lý hoặc kế toán.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS', '15. Nhóm báo cáo'))
+            ),
+
+            'loyalty_policy' => self::guide(
+                'Tích điểm và chăm sóc khách hàng',
+                'Các trang loyalty quản lý chính sách tích điểm, thành viên, điều kiện ưu đãi và mở rộng chăm sóc khách hàng sau bán.',
+                array('Chính sách tích điểm dùng để làm gì?', 'Tạo chính sách ở đâu?', 'Liên quan Zalo/POS thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('#loyalty-stats, .card, h4', 'Tổng quan loyalty', 'Theo dõi chính sách, thành viên hoặc cài đặt tích điểm tùy view đang mở.', 'bottom', 'center'),
+                    self::step('#loyalty-table, table', 'Danh sách/chỉ tiết chính sách', 'Xem chính sách tích điểm, trạng thái, điều kiện và thao tác chi tiết.', 'top', 'center'),
+                    self::step('#btn-save-loyalty-settings, .btn-primary, .btn-success', 'Lưu/cập nhật', 'Lưu chính sách hoặc cài đặt sau khi kiểm tra điều kiện áp dụng.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('tich diem', 'loyalty'), 'Chính sách tích điểm hỗ trợ chăm sóc khách hàng sau bán và có thể mở rộng sang Zalo hoặc POS.'),
+                    self::knowledge(array('tao chinh sach', 'policy'), 'Tạo chính sách tích điểm từ danh sách hoặc dashboard loyalty, sau đó cấu hình điều kiện và phạm vi áp dụng.'),
+                )),
+                array('sourceSections' => array('9. Cấu hình Zalo OA'))
+            ),
+
+            'zalo_oa' => self::guide(
+                'Cấu hình Zalo OA',
+                'Trang Zalo OA cấu hình kết nối gửi thông tin đơn hàng qua Zalo, kèm liên kết hóa đơn điện tử và hướng mở rộng chăm sóc khách hàng.',
+                array('Zalo OA dùng để làm gì?', 'Kết nối OA ở đâu?', 'Tin nhắn đơn hàng gửi khi nào?'),
+                array(
+                    self::step('#tgs-zalo-root, .tgs-zalo-admin, h4, h5', 'Zalo OA', 'Màn hình cấu hình kết nối Zalo để gửi thông tin đơn hàng và thông báo cho khách.', 'bottom', 'start'),
+                    self::step('.nav-tabs, .nav-pills, [data-bs-toggle="tab"]', 'Các tab cấu hình', 'Chuyển giữa cấu hình OA, mẫu tin, log gửi và các phần kiểm tra kết nối nếu có.', 'bottom', 'center'),
+                    self::step('form, input, select, textarea, .card', 'Thông tin kết nối', 'Nhập/cập nhật OA, token, provider trung gian hoặc mẫu nội dung theo cấu hình hệ thống.', 'top', 'center'),
+                    self::step('table, .log, .message-log', 'Lịch sử gửi', 'Kiểm tra tin nhắn đã gửi, lỗi kết nối và phản hồi từ provider.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-success, button[type="submit"]', 'Lưu/kiểm tra kết nối', 'Lưu cấu hình hoặc kiểm tra trước khi áp dụng vào POS.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('zalo', 'oa', 'don hang'), 'Zalo OA dùng để gửi thông tin đơn hàng sau bán, có thể kèm link tra cứu hóa đơn điện tử cho khách.'),
+                    self::knowledge(array('ket noi', 'token', 'provider'), 'Cấu hình kết nối gồm thông tin OA/token/provider trung gian. Chỉ người phụ trách hệ thống nên sửa.'),
+                    self::knowledge(array('gui khi nao', 'pos'), 'Tin nhắn thường phát sinh sau luồng bán hàng POS hoặc khi hệ thống gọi sự kiện gửi thông báo đơn hàng.'),
+                    self::knowledge(array('mo rong', 'cham soc', 'tich diem'), 'Về sau có thể mở rộng Zalo OA cho tích điểm, chăm sóc khách hàng và tư vấn tự động.'),
+                ),
+                array('sourceSections' => array('9. Cấu hình Zalo OA'))
+            ),
+
+            'viettel_invoice' => self::guide(
+                'Hóa đơn điện tử Viettel',
+                'Trang Viettel Invoice phục vụ tạo nháp, phát hành, hủy hoặc kiểm tra luồng gửi hóa đơn điện tử từ hệ thống shop.',
+                array('Tạo hóa đơn Viettel ở đâu?', 'Gửi phát hành khác gì tạo nháp?', 'Xem response lỗi ở đâu?'),
+                array(
+                    self::step('#tgs-viettel-create-root, #tgs-viettel-settings-root, h4, h5', 'Viettel Invoice', 'Màn hình tích hợp hóa đơn điện tử Viettel cho luồng bán hàng và kế toán.', 'bottom', 'start'),
+                    self::step('#tgs-viettel-tabs, .nav-tabs', 'Chế độ thao tác', 'Chọn tạo nháp, phát hành hoặc hủy hóa đơn tùy nghiệp vụ cần xử lý.', 'bottom', 'center'),
+                    self::step('#tgs-viettel-payload-draft, #tgs-viettel-payload-issue, #tgs-viettel-payload-cancel, textarea', 'Payload JSON', 'Kiểm tra dữ liệu hóa đơn trước khi gửi lên Viettel.', 'top', 'center'),
+                    self::step('.tgs-viettel-send-btn, #btnTestApi, .btn-primary, .btn-danger', 'Gửi request', 'Chỉ gửi khi đã kiểm tra đúng dữ liệu vì request có thể tạo/phát hành/hủy hóa đơn thật.', 'left', 'center'),
+                    self::step('#tgs-viettel-response-status, #tgs-viettel-response-box, table', 'Response và lịch sử', 'Đọc trạng thái, lỗi hoặc hóa đơn gần đây để đối chiếu với kế toán.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('tao nhap', 'draft'), 'Tạo nháp gửi dữ liệu lên Viettel nhưng chưa phải bước phát hành cuối cùng theo luồng kế toán.'),
+                    self::knowledge(array('phat hanh', 'gui cqt'), 'Phát hành/gửi CQT là thao tác nhạy cảm, cần kiểm tra dữ liệu khách hàng, sản phẩm, thuế, series và template trước khi gửi.'),
+                    self::knowledge(array('huy hoa don', 'cancel'), 'Hủy hóa đơn cần đủ thông tin bắt buộc như mã số thuế, số hóa đơn, template, ngày phát hành và lý do hủy.'),
+                    self::knowledge(array('response', 'loi', 'http'), 'Khu response hiển thị kết quả HTTP/payload trả về. Dùng để đọc lỗi cấu hình, lỗi dữ liệu hoặc lỗi API Viettel.'),
+                ),
+                array('sourceSections' => array('10. Cấu hình hóa đơn điện tử Viettel'))
+            ),
+
+            'viettel_invoice_settings' => self::guide(
+                'Cấu hình hóa đơn điện tử Viettel',
+                'Trang cấu hình Viettel Invoice lưu thông tin kết nối, template, series và chế độ tự động tạo hóa đơn.',
+                array('Cấu hình Viettel gồm gì?', 'Series mặc định là gì?', 'Tự động tạo hóa đơn khi nào?'),
+                array(
+                    self::step('#tgs-viettel-settings-root, h4, h5', 'Cấu hình Viettel Invoice', 'Thiết lập kết nối và thông tin mặc định trước khi phát hành hóa đơn điện tử.', 'bottom', 'start'),
+                    self::step('form, input, select, textarea', 'Thông tin kết nối', 'Nhập API, tài khoản, mã số thuế, template code, series và các trường bắt buộc.', 'top', 'center'),
+                    self::step('#vi_default_invoice_series, input[id*="series"], input[id*="template"]', 'Template và series', 'Đặt template/series mặc định để payload hóa đơn sinh đúng mẫu phát hành.', 'bottom', 'center'),
+                    self::step('#vi_auto_enabled, input[type="checkbox"]', 'Tự động tạo hóa đơn', 'Bật/tắt luồng tự động phát sinh hóa đơn từ đơn bán/POS nếu chính sách vận hành cho phép.', 'left', 'center'),
+                    self::step('.btn-primary, .btn-success, button[type="submit"]', 'Lưu cấu hình', 'Lưu sau khi kiểm tra đúng thông tin kết nối và đúng website chi nhánh.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('template', 'series', 'mau hoa don'), 'Template code và invoice series quyết định mẫu hóa đơn phát hành. Sai thông tin có thể làm gửi Viettel thất bại.'),
+                    self::knowledge(array('tu dong', 'auto', 'pos'), 'Tự động tạo hóa đơn khi sale completed/POS chỉ nên bật khi đã kiểm tra luồng dữ liệu bán hàng, sản phẩm và thuế.'),
+                    self::knowledge(array('ket noi', 'api', 'tai khoan'), 'Thông tin kết nối Viettel là cấu hình nhạy cảm, chỉ admin/kế toán kỹ thuật nên chỉnh.'),
+                ),
+                array('sourceSections' => array('10. Cấu hình hóa đơn điện tử Viettel'))
+            ),
+
+            'permission_settings' => self::guide(
+                'Phân quyền menu',
+                'Trang phân quyền menu gán quyền theo user, nhóm quyền hoặc tùy chỉnh riêng để mỗi vai trò chỉ thấy phần phù hợp.',
+                array('Gán quyền theo user ở đâu?', 'Full và tùy chỉnh khác gì?', 'Nhóm quyền dùng để làm gì?'),
+                array(
+                    self::step('.wrap h1, h1, h2', 'Phân quyền menu', 'Màn hình này kiểm soát menu người dùng nhìn thấy trong hệ thống.', 'bottom', 'start'),
+                    self::step('select, input[type="search"], .user-selector, table', 'Chọn người dùng', 'Tìm user hoặc vai trò cần gán quyền trước khi chỉnh menu.', 'bottom', 'center'),
+                    self::step('.permission-tree, .menu-permission, table, form', 'Cây quyền/menu', 'Tích các menu hoặc nhóm quyền phù hợp với công việc thực tế.', 'top', 'center'),
+                    self::step('.button-primary, .btn-primary, button[type="submit"]', 'Lưu phân quyền', 'Lưu sau khi kiểm tra đúng user/role vì thay đổi ảnh hưởng quyền thao tác của nhân viên.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('phan quyen', 'menu', 'user'), 'Phân quyền menu giúp mỗi nhóm nhân sự chỉ thấy các phần phù hợp, giảm thao tác nhầm.'),
+                    self::knowledge(array('vai tro', 'ke toan', 'kho', 'ban hang', 'admin'), 'Các nhóm vai trò thường gồm kế toán mua hàng, nhân viên kho, nhân viên bán hàng, quản lý kinh doanh và admin.'),
+                    self::knowledge(array('nhom quyen', 'role'), 'Nhóm quyền giúp tái sử dụng cùng một bộ menu cho nhiều user thay vì cấu hình từng người.'),
+                ),
+                array('sourceSections' => array('11. Phân quyền menu'))
+            ),
+
+            'permission_roles' => self::guide(
+                'Nhóm quyền',
+                'Trang nhóm quyền tạo/sửa/xóa các bộ menu dùng chung cho nhiều người dùng.',
+                array('Tạo nhóm quyền thế nào?', 'Sửa nhóm có ảnh hưởng ai?', 'Khi nào dùng tùy chỉnh riêng?'),
+                array_merge($generic_steps, array(
+                    self::step('table, .role-list, form', 'Danh sách nhóm quyền', 'Xem các nhóm quyền đang có và menu được gán cho từng nhóm.', 'top', 'center'),
+                    self::step('.button-primary, .btn-primary, button[type="submit"]', 'Lưu nhóm quyền', 'Lưu nhóm sau khi kiểm tra đúng menu cho vai trò vận hành.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('tao nhom', 'role'), 'Tạo nhóm quyền khi nhiều người có cùng phạm vi công việc và menu cần truy cập.'),
+                    self::knowledge(array('anh huong', 'user'), 'Sửa nhóm quyền có thể ảnh hưởng tất cả user đang dùng nhóm đó. Kiểm tra danh sách user trước khi đổi lớn.'),
+                )),
+                array('sourceSections' => array('11. Phân quyền menu'))
+            ),
+
+            'merge_guest_persons' => self::guide(
+                'Gộp khách lẻ trùng lặp',
+                'Công cụ này tìm và gộp các khách lẻ trùng để làm sạch dữ liệu khách hàng và giao dịch.',
+                array('Khi nào cần gộp khách?', 'Gộp có mất lịch sử không?', 'Cần kiểm tra gì trước khi chạy?'),
+                array_merge($generic_steps, array(
+                    self::step('table, .card', 'Danh sách khách trùng', 'Kiểm tra các nhóm khách nghi trùng trước khi chọn gộp.', 'top', 'center'),
+                    self::step('.btn-warning, .btn-danger, .btn-primary', 'Thao tác gộp', 'Chỉ chạy khi chắc chắn các bản ghi thuộc cùng một khách hoặc cùng nhóm khách lẻ cần gom.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('khach le', 'trung lap', 'gop'), 'Gộp khách lẻ dùng để làm sạch dữ liệu khách hàng khi có nhiều bản ghi trùng hoặc phát sinh từ POS.'),
+                    self::knowledge(array('lich su', 'giao dich'), 'Trước khi gộp, kiểm tra lịch sử giao dịch để tránh gom nhầm hai khách khác nhau.'),
+                )),
+                array('sourceSections' => array('2.1 Khách hàng'))
+            ),
+
+            'legacy_import' => self::guide(
+                'Nhập hàng',
+                'Trang nhập hàng legacy dùng để ghi nhận hàng vào kho hoặc shop trong các luồng cũ còn được giữ lại.',
+                array('Nhập hàng bắt đầu ở đâu?', 'Có cần HSD không?', 'Sau nhập kiểm tra tồn thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('form, table', 'Form nhập hàng', 'Nhập thông tin nhà cung cấp, sản phẩm, số lượng, giá và HSD nếu sản phẩm cần theo dõi.', 'top', 'center'),
+                    self::step('.btn-primary, .btn-success, button[type="submit"]', 'Lưu nhập hàng', 'Lưu sau khi kiểm tra đúng sản phẩm và số lượng thực nhận.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('nhap hang', 'nhap kho'), 'Nhập hàng làm tăng tồn kho và nên có chứng từ rõ ràng để đối chiếu sau này.'),
+                    self::knowledge(array('hsd', 'han su dung'), 'Nếu sản phẩm có HSD, ghi nhận hạn dùng ngay lúc nhập để hệ thống cảnh báo hàng sắp hết hạn.'),
+                )),
+                array('sourceSections' => array('4.2 Phiếu nhập kho', '1.5 Quản lý hạn sử dụng'))
+            ),
+
+            'ledger_view' => self::guide(
+                'Sổ cái kho',
+                'Sổ cái ghi lại các phát sinh làm thay đổi tồn kho hoặc dòng tiền để phục vụ đối soát.',
+                array('Sổ cái dùng để làm gì?', 'Tìm phát sinh ở đâu?', 'Liên quan phiếu nào?'),
+                array_merge($generic_steps, array(
+                    self::step('input[type="search"], form, select', 'Tìm/lọc phát sinh', 'Lọc theo ngày, loại phiếu, sản phẩm hoặc mã chứng từ nếu trang hỗ trợ.', 'bottom', 'center'),
+                    self::step('table, .dataTable', 'Bảng sổ cái', 'Đọc từng phát sinh nhập/xuất/thu/chi và mở phiếu liên quan để đối soát.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('so cai', 'ledger'), 'Sổ cái là lịch sử phát sinh dùng để giải thích vì sao tồn kho hoặc công nợ thay đổi.'),
+                    self::knowledge(array('phieu lien quan', 'doi soat'), 'Mở mã phiếu liên quan từ dòng sổ cái để kiểm tra chứng từ gốc.'),
+                )),
+                array('sourceSections' => array('3. Quản lý giao dịch', '4. Kho hàng'))
+            ),
+
+            'pos_screen' => self::guide(
+                'POS bán hàng',
+                'POS dùng cho nhân viên bán hàng tại quầy để tạo đơn, áp dụng khuyến mại, thanh toán, in phiếu và gửi thông tin cho khách.',
+                array('Tạo đơn bán thế nào?', 'Khuyến mại POS áp dụng ra sao?', 'Gửi hóa đơn/Zalo ở đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('#tmdwppos, .pos-root, .pos-wrapper', 'Màn hình POS', 'Đây là khu vực bán hàng tại quầy, ưu tiên thao tác nhanh và chính xác.', 'bottom', 'center'),
+                    self::step('input[type="search"], input[name*="barcode"], .barcode', 'Quét/tìm sản phẩm', 'Quét barcode hoặc tìm sản phẩm để thêm vào đơn bán.', 'bottom', 'center'),
+                    self::step('.cart, .order-items, table', 'Giỏ hàng/đơn hiện tại', 'Kiểm tra sản phẩm, số lượng, giá, khuyến mại và tổng tiền trước khi thanh toán.', 'top', 'center'),
+                    self::step('.payment, .checkout, .btn-primary', 'Thanh toán và hoàn tất', 'Chọn hình thức thanh toán, in phiếu và xử lý gửi thông tin đơn/hóa đơn nếu có.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('tao don', 'ban hang'), 'Quét hoặc tìm sản phẩm, kiểm tra giỏ hàng, chọn khách nếu cần rồi thanh toán để hoàn tất đơn.'),
+                    self::knowledge(array('khuyen mai', 'giam gia', 'hang tang'), 'Khuyến mại POS lấy từ chương trình bán hàng đã cấu hình, ví dụ giảm giá, hàng tặng hoặc khai trương shop.'),
+                    self::knowledge(array('zalo', 'hoa don', 'viettel'), 'Sau bán hàng, hệ thống có thể gửi thông tin đơn qua Zalo và phát hành/tra cứu hóa đơn điện tử nếu đã cấu hình.'),
+                )),
+                array('sourceSections' => array('8. Quản lý bán hàng ở POS', '9. Zalo OA', '10. Hóa đơn Viettel'))
+            ),
+
+            'guide_settings' => self::guide(
+                'Cấu hình AI hướng dẫn',
+                'Trang này cho biết plugin hướng dẫn đang hoạt động, coverage theo view và các hook để mở rộng tour hoặc nối AI thật.',
+                array('Reset hướng dẫn thế nào?', 'Thêm tour mới ở đâu?', 'Nối AI thật bằng cách nào?'),
+                array(
+                    self::step('.tgs-ai-guides-admin', 'Trung tâm hướng dẫn', 'Trang này giúp đội triển khai kiểm tra coverage, reset trạng thái và xem cách mở rộng.', 'bottom', 'center'),
+                    self::step('[data-tgs-ai-reset-site]', 'Reset hướng dẫn đã xem', 'Dùng để cho tài khoản hiện tại xem lại toàn bộ tour trên website chi nhánh này.', 'left', 'center'),
+                    self::step('.tgs-ai-guides-admin table', 'Coverage hiện có', 'Bảng liệt kê guide key, view được map và số bước/câu hỏi nhanh của từng ngữ cảnh.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('reset', 'xem lai tat ca'), 'Trên trang AI hướng dẫn, bấm reset để xóa lịch sử đã xem của tài khoản hiện tại trên website chi nhánh này.'),
+                    self::knowledge(array('them tour', 'mo rong'), 'Lập trình viên có thể mở rộng tour qua filter `tgs_ai_guides_tour` hoặc map view qua filter `tgs_ai_guides_group_for_view`.'),
+                    self::knowledge(array('ai that', 'ket noi ai'), 'Để nối AI thật, hook vào filter `tgs_ai_guides_ai_answer` và trả về mảng `answer`, `matched`, `quickQuestions`, có thể dùng `tour.context` làm prompt context.'),
+                ),
+                array('sourceSections' => array('16. Bảng tóm tắt chức năng'))
+            ),
+
+            'generic' => self::guide(
+                'Màn hình TGS',
+                'Trang này thuộc hệ sinh thái TGS. Tour chung sẽ hướng dẫn thanh điều hướng, tìm kiếm, vùng làm việc và AI hỗ trợ.',
+                array('Trang này dùng để làm gì?', 'Tôi cần thao tác bắt đầu ở đâu?', 'Làm sao xem lại hướng dẫn?'),
+                $generic_steps,
+                $generic_knowledge,
+                array('sourceSections' => array('16. Bảng tóm tắt chức năng'))
+            ),
+        );
+    }
+
+    private static function guide($title, $summary, $quick_questions, $steps, $knowledge, $context = array())
+    {
+        return array(
+            'title' => $title,
+            'summary' => $summary,
+            'quick_questions' => $quick_questions,
+            'steps' => $steps,
+            'knowledge' => $knowledge,
+            'context' => $context,
         );
     }
 
