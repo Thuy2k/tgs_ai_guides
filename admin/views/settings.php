@@ -73,7 +73,8 @@ $site_id = get_current_blog_id();
                 <li><code>tgs_ai_guides_tour</code>: thêm/sửa steps, quick questions, knowledge hoặc context theo view.</li>
                 <li><code>tgs_ai_guides_group_for_view</code>: ánh xạ view/page mới về một ngữ cảnh có sẵn.</li>
                 <li><code>tgs_ai_guides_supported_pages</code>: cho phép plugin chạy trên admin page khác ngoài shell kho.</li>
-                <li><code>tgs_ai_guides_ai_answer</code>: nối sang AI thật sau này; filter nhận thêm <code>$tour['context']</code> để trả lời theo đúng trang.</li>
+                <li><code>tgs_ai_guides_global_step_cooldown_minutes</code>: chỉnh số phút trước khi các bước header/tìm kiếm/menu được tự động hiển thị lại.</li>
+                <li><code>tgs_ai_guides_ai_answer</code>: nối sang AI thật; filter nhận <code>$tour['context']</code> và <code>$scope</code> là <code>page</code> hoặc <code>project</code>.</li>
             </ul>
         </div>
     </div>

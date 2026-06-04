@@ -127,6 +127,34 @@
     color: #075985;
 }
 
+.tgs-ai-guide-scope {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 12px;
+    padding: 3px;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.tgs-ai-guide-scope button {
+    min-height: 30px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #475467;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.tgs-ai-guide-scope button.is-active {
+    background: #fff;
+    color: #0f766e;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .12);
+}
+
 .tgs-ai-guide-messages {
     display: flex;
     flex-direction: column;

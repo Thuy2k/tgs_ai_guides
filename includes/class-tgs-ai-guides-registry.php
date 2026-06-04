@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 
 final class TGS_AI_Guides_Registry
 {
-    const VERSION = '2026-06-04-03';
+    const VERSION = '2026-06-04-04';
 
     public static function get_tour($view, $page = 'tgs-shop-management')
     {
@@ -34,6 +34,9 @@ final class TGS_AI_Guides_Registry
             )
         );
 
+        $global_steps = array_values($base['steps']);
+        $page_steps = array_values($guide['steps']);
+
         $tour = array(
             'id' => 'tgs-' . $page . '-' . $view,
             'version' => self::VERSION,
@@ -44,7 +47,9 @@ final class TGS_AI_Guides_Registry
             'title' => $guide['title'],
             'summary' => $guide['summary'],
             'quickQuestions' => $quick_questions,
-            'steps' => array_values(array_merge($base['steps'], $guide['steps'])),
+            'globalSteps' => $global_steps,
+            'pageSteps' => $page_steps,
+            'steps' => array_values(array_merge($page_steps, $global_steps)),
             'knowledge' => array_values(array_merge($base['knowledge'], $guide['knowledge'])),
             'context' => $context,
         );
@@ -52,8 +57,13 @@ final class TGS_AI_Guides_Registry
         return apply_filters('tgs_ai_guides_tour', $tour, $view, $guide_key, $page);
     }
 
-    public static function answer_question($view, $question, $page = 'tgs-shop-management')
+    public static function answer_question($view, $question, $page = 'tgs-shop-management', $scope = 'page')
     {
+        $scope = sanitize_key($scope ?: 'page');
+        if ($scope === 'project') {
+            return self::answer_project_question($question, $view, $page);
+        }
+
         $tour = self::get_tour($view, $page);
         $normalized_question = self::normalize($question);
         $best = null;
@@ -88,6 +98,88 @@ final class TGS_AI_Guides_Registry
             'matched' => false,
             'quickQuestions' => $tour['quickQuestions'],
             'context' => $tour['context'],
+        );
+    }
+
+    private static function answer_project_question($question, $view, $page)
+    {
+        $definitions = self::definitions();
+        $normalized_question = self::normalize($question);
+        $best = null;
+        $best_score = 0;
+
+        foreach ($definitions as $guide_key => $guide) {
+            $entries = isset($guide['knowledge']) ? $guide['knowledge'] : array();
+            foreach ($entries as $entry) {
+                $score = 0;
+                foreach ($entry['terms'] as $term) {
+                    $needle = self::normalize($term);
+                    if ($needle !== '' && strpos($normalized_question, $needle) !== false) {
+                        $score += strlen($needle) > 8 ? 3 : 1;
+                    }
+                }
+
+                if ($score > $best_score) {
+                    $best_score = $score;
+                    $best = array(
+                        'guideKey' => $guide_key,
+                        'title' => isset($guide['title']) ? $guide['title'] : 'Hướng dẫn chung',
+                        'answer' => $entry['answer'],
+                    );
+                }
+            }
+        }
+
+        $quick_questions = self::project_quick_questions();
+
+        if ($best) {
+            return array(
+                'answer' => 'Theo phần "' . $best['title'] . '": ' . $best['answer'],
+                'matched' => true,
+                'scope' => 'project',
+                'guideKey' => $best['guideKey'],
+                'quickQuestions' => $quick_questions,
+                'context' => self::project_context($view, $page),
+            );
+        }
+
+        return array(
+            'answer' => 'Mình đang tìm trong toàn bộ bộ hướng dẫn dự án TGS: sản phẩm, đối tác, phiếu giao dịch, kho, quét tồn/PO, mua hàng, luân chuyển nội bộ, báo cáo và cấu hình hệ thống. Bạn có thể hỏi cụ thể hơn như: "' . implode('", "', array_slice($quick_questions, 0, 3)) . '".',
+            'matched' => false,
+            'scope' => 'project',
+            'quickQuestions' => $quick_questions,
+            'context' => self::project_context($view, $page),
+        );
+    }
+
+    private static function project_quick_questions()
+    {
+        return array(
+            'Quét tồn thông minh dùng thế nào?',
+            'PO theo gợi ý và PO chủ động khác gì?',
+            'Cấu hình min/max tồn kho ở đâu?',
+            'Lô mua, hợp đồng và chính sách mua liên quan thế nào?',
+            'Luân chuyển nội bộ gồm những bước nào?',
+        );
+    }
+
+    private static function project_context($view, $page)
+    {
+        return array(
+            'page' => sanitize_key($page ?: 'tgs-shop-management'),
+            'view' => sanitize_key($view ?: 'dashboard'),
+            'scope' => 'project',
+            'source' => 'TGS Shop Management full operating guide',
+            'aiInstruction' => 'Trả lời bằng tiếng Việt. Khi scope là project, được tổng hợp toàn bộ ngữ cảnh vận hành trong TGS Shop, Purchase, Transfer và Reporting; khi cần thao tác cụ thể thì chỉ rõ màn hình hoặc view liên quan.',
+            'availableDomains' => array(
+                'Sản phẩm và danh mục',
+                'Đối tác, khách hàng, nhà cung cấp',
+                'Phiếu giao dịch và kho',
+                'Quét tồn thông minh và PO',
+                'Mua hàng, min/max, lô mua, hợp đồng, chính sách',
+                'Luân chuyển hàng nội bộ',
+                'Báo cáo và cấu hình hệ thống',
+            ),
         );
     }
 
@@ -147,6 +239,18 @@ final class TGS_AI_Guides_Registry
 
         if (strpos($view, 'viettel-invoice') === 0) {
             return apply_filters('tgs_ai_guides_group_for_view', 'viettel_invoice', $view, $page);
+        }
+
+        if (strpos($view, 'purchase-po') === 0 || strpos($view, 'po-') === 0 || strpos($view, 'stock-scan') === 0 || strpos($view, 'smart-stock') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'purchase_po', $view, $page);
+        }
+
+        if (strpos($view, 'purchase-') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'purchase_dashboard', $view, $page);
+        }
+
+        if (strpos($view, 'transfer-') === 0 || strpos($view, 'ticket-transfer-') === 0 || strpos($view, 'ticket-internal-') === 0) {
+            return apply_filters('tgs_ai_guides_group_for_view', 'transfer_internal', $view, $page);
         }
 
         if (strpos($view, 'product') === 0) {
@@ -248,6 +352,15 @@ final class TGS_AI_Guides_Registry
             'reports' => 'reports_overview',
             'report-dashboard' => 'report_dashboard',
             'storekeeper-stock-report' => 'storekeeper_report',
+            'analytics-report-overview' => 'report_dashboard',
+            'analytics-report-sales' => 'report_detail',
+            'analytics-report-product-sales' => 'report_detail',
+            'analytics-report-inventory' => 'inventory_report',
+            'analytics-report-transfer' => 'transfer_report',
+            'analytics-report-purchase-suggestion' => 'purchase_po',
+            'analytics-report-customer' => 'report_detail',
+            'analytics-report-sell-speed' => 'purchase_sell_speed_config',
+            'analytics-report-stockout-forecast' => 'purchase_po',
 
             'admin-settings' => 'settings',
             'label-print-settings' => 'label_print_settings',
@@ -258,6 +371,45 @@ final class TGS_AI_Guides_Registry
             'api-detail' => 'api_detail',
             'tools-merge-guest-persons' => 'merge_guest_persons',
             'ai-guides' => 'guide_settings',
+
+            'purchase-dashboard' => 'purchase_dashboard',
+            'purchase-alerts' => 'purchase_alerts',
+            'purchase-stock-config' => 'purchase_stock_config',
+            'purchase-sell-speed-config' => 'purchase_sell_speed_config',
+            'purchase-contracts' => 'purchase_contract',
+            'purchase-contract-add' => 'purchase_contract_form',
+            'purchase-contract-detail' => 'purchase_contract',
+            'purchase-lots' => 'purchase_lot',
+            'purchase-lot-add' => 'purchase_lot_form',
+            'purchase-lot-detail' => 'purchase_lot',
+            'purchase-policies' => 'purchase_policy',
+            'purchase-policy-add' => 'purchase_policy_form',
+            'purchase-policy-detail' => 'purchase_policy',
+            'purchase-batches' => 'purchase_batch',
+            'purchase-batch-detail' => 'purchase_batch',
+            'purchase-payments' => 'purchase_payment',
+            'purchase-payment-detail' => 'purchase_payment',
+            'purchase-po-list' => 'purchase_po',
+            'purchase-po-add' => 'purchase_po',
+            'purchase-po-detail' => 'purchase_po',
+            'purchase-stock-scan' => 'purchase_po',
+            'purchase-smart-stock-scan' => 'purchase_po',
+
+            'transfer-report' => 'transfer_report',
+            'transfer-export-add' => 'transfer_export',
+            'ticket-transfer-exports' => 'transfer_export_list',
+            'ticket-transfer-export-detail' => 'transfer_detail',
+            'transfer-pending-imports' => 'transfer_pending_import',
+            'transfer-import-add' => 'transfer_import',
+            'ticket-transfer-imports' => 'transfer_import_list',
+            'ticket-transfer-import-detail' => 'transfer_detail',
+            'transfer-return-add' => 'transfer_return',
+            'ticket-internal-returns' => 'transfer_return_list',
+            'ticket-internal-return-detail' => 'transfer_detail',
+            'transfer-pending-returns' => 'transfer_pending_return',
+            'transfer-return-receive-add' => 'transfer_return_receive',
+            'ticket-internal-return-receives' => 'transfer_return_receive_list',
+            'ticket-internal-return-receive-detail' => 'transfer_detail',
 
             'selling-dashboard' => 'selling_dashboard',
             'selling-policies' => 'selling_policy',
@@ -295,11 +447,11 @@ final class TGS_AI_Guides_Registry
         return array(
             'base' => array(
                 'steps' => array(
-                    self::step('#tgs-mega-nav, .layout-navbar, .menu, #adminmenu', 'Thanh điều hướng chính', 'Dùng để chuyển giữa Dashboard, Sản phẩm, Đối tác, Giao dịch, Kho hàng, Báo cáo, Công cụ và Hệ thống.', 'bottom', 'center'),
-                    self::step('#globalSearchWrapper, #globalSearchInput, .tgs-global-search', 'Tìm kiếm toàn hệ thống', 'Tra nhanh barcode, sản phẩm hoặc phiếu. Khi đang thao tác bằng bàn phím, có thể dùng Ctrl+K nếu trang hỗ trợ.', 'bottom', 'center'),
-                    self::step('.tgs-nav-items, .menu-inner, #adminmenu', 'Nhóm menu nghiệp vụ', 'Menu được chia theo luồng vận hành: hàng hóa, đối tác, chứng từ, kho, báo cáo, hệ thống và các plugin mở rộng.', 'bottom', 'center'),
-                    self::step('.container-xxl.flex-grow-1.container-p-y, .wrap, #wpbody-content', 'Vùng làm việc hiện tại', 'Toàn bộ bảng dữ liệu, form nhập liệu, báo cáo và cấu hình của view đang mở nằm trong khu vực này.', 'top', 'center'),
-                    self::step('.tgs-ai-guide-launcher', 'AI hỗ trợ theo trang', 'Bấm nút này để chạy lại tour driver.js hoặc hỏi nhanh. Câu trả lời bám theo đúng view hiện tại, không dùng chung ngữ cảnh với trang khác.', 'left', 'end'),
+                    self::step('#tgs-mega-nav, .layout-navbar, .menu, #adminmenu', 'Thanh điều hướng chính', 'Dùng để chuyển giữa Dashboard, Sản phẩm, Đối tác, Giao dịch, Kho hàng, Báo cáo, Công cụ và Hệ thống.', 'bottom', 'center', array('scope' => 'global', 'cadence' => 'cooldown')),
+                    self::step('#globalSearchWrapper, #globalSearchInput, .tgs-global-search', 'Tìm kiếm toàn hệ thống', 'Tra nhanh barcode, sản phẩm hoặc phiếu. Khi đang thao tác bằng bàn phím, có thể dùng Ctrl+K nếu trang hỗ trợ.', 'bottom', 'center', array('scope' => 'global', 'cadence' => 'cooldown')),
+                    self::step('.tgs-nav-items, .menu-inner, #adminmenu', 'Nhóm menu nghiệp vụ', 'Menu được chia theo luồng vận hành: hàng hóa, đối tác, chứng từ, kho, báo cáo, hệ thống và các plugin mở rộng.', 'bottom', 'center', array('scope' => 'global', 'cadence' => 'cooldown')),
+                    self::step('.container-xxl.flex-grow-1.container-p-y, .wrap, #wpbody-content', 'Vùng làm việc hiện tại', 'Toàn bộ bảng dữ liệu, form nhập liệu, báo cáo và cấu hình của view đang mở nằm trong khu vực này.', 'top', 'center', array('scope' => 'global', 'cadence' => 'cooldown')),
+                    self::step('.tgs-ai-guide-launcher', 'AI hỗ trợ theo trang', 'Bấm nút này để chạy lại tour driver.js hoặc hỏi nhanh. Câu trả lời bám theo đúng view hiện tại, không dùng chung ngữ cảnh với trang khác.', 'left', 'end', array('scope' => 'global', 'cadence' => 'cooldown')),
                 ),
                 'knowledge' => array(
                     self::knowledge(array('tim kiem', 'search', 'ctrl k', 'barcode'), 'Dùng thanh tìm kiếm trên đầu trang để tra barcode, sản phẩm hoặc phiếu. Nếu trang hỗ trợ phím tắt, bấm Ctrl+K rồi nhập từ khóa.'),
@@ -655,6 +807,243 @@ final class TGS_AI_Guides_Registry
                     self::knowledge(array('kiem tra chi nhanh', 'doi chieu'), 'Khi số liệu hoặc giao diện không khớp, hãy kiểm tra đang đứng đúng chi nhánh/site trước khi xử lý dữ liệu sản phẩm, phiếu hoặc báo cáo.'),
                 )),
                 array('sourceSections' => array('13. Cài đặt thương hiệu và in phiếu', '16. Bảng tóm tắt chức năng'))
+            ),
+
+            'purchase_dashboard' => self::guide(
+                'Dashboard mua hàng',
+                'Trang tổng quan mua hàng gom nhanh hợp đồng, chính sách, lô mua, batch, công nợ và cảnh báo cần xử lý.',
+                array('Dashboard mua hàng xem gì?', 'Cảnh báo mua hàng ở đâu?', 'Đi tới lô mua/hợp đồng thế nào?'),
+                array(
+                    self::step('h4, .card-title', 'Tổng quan mua hàng', 'Xem nhanh sức khỏe mua hàng trước khi đi sâu vào hợp đồng, lô mua, chính sách hoặc công nợ.', 'bottom', 'start'),
+                    self::step('#stat-contracts, #stat-policies, .row .card', 'Các chỉ số nhanh', 'Theo dõi hợp đồng, chính sách, lô mua, batch và công nợ đang cần chú ý.', 'bottom', 'center'),
+                    self::step('a[href*="purchase-alerts"], a[href*="purchase-stock-config"], .btn', 'Lối tắt nghiệp vụ', 'Đi nhanh tới cảnh báo tồn kho, cấu hình min/max, lô mua, hợp đồng hoặc chính sách mua.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Danh sách gần đây', 'Kiểm tra các bản ghi mua hàng mới nhất để xử lý tiếp hoặc mở chi tiết.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('dashboard mua hang', 'tong quan mua hang'), 'Dashboard mua hàng giúp quản lý nắm nhanh hợp đồng, chính sách, lô mua, batch và công nợ cần xử lý. Dùng các thẻ và bảng gần đây để đi vào phần chi tiết.'),
+                    self::knowledge(array('canh bao', 'thieu hang', 'min max'), 'Mở Trung tâm Cảnh báo hoặc Cấu hình Min/Max khi cần xử lý thiếu hàng, dưới min, vượt max hoặc batch sắp hết.'),
+                    self::knowledge(array('lo mua', 'hop dong', 'chinh sach'), 'Lô mua gom nhu cầu mua theo đợt/NCC; hợp đồng lưu điều khoản lớn; chính sách mua lưu các ưu đãi, quà tặng, giá hoặc điều kiện áp dụng.'),
+                ),
+                array('sourceSections' => array('5. Quét tồn thông minh và PO', '6. Quản lý mua hàng', '7. Lô mua và hợp đồng'))
+            ),
+
+            'purchase_alerts' => self::guide(
+                'Trung tâm cảnh báo mua hàng',
+                'Màn hình này là lớp quét tồn thông minh hiện có: so tồn thực tế với cấu hình min/max, theo dõi batch sắp hết, cam kết NCC và công nợ/hợp đồng.',
+                array('Quét tồn thông minh ở đâu?', 'Dưới Min và trên Max nghĩa là gì?', 'Cần xử lý tab nào trước?'),
+                array(
+                    self::step('#alert-summary-row, .kpi-card', 'KPI cảnh báo', 'Ưu tiên đọc hết hàng, dưới min, batch sắp hết, cam kết chậm và nợ quá hạn trước khi xử lý chi tiết.', 'bottom', 'center'),
+                    self::step('#alert-tabs, .nav-tabs', 'Nhóm cảnh báo', 'Chuyển giữa tồn kho shop, batch sắp hết, cam kết NCC và công nợ/hợp đồng.', 'bottom', 'center'),
+                    self::step('#tab-shop-stock, #ss-tbody', 'Tồn kho shop theo min/max', 'Bảng này so tồn từng shop với min/max để xác định hết hàng, dưới min, trên max hoặc bình thường.', 'top', 'center'),
+                    self::step('#ss-filter-level, #ss-filter-shop-id, #ss-filter-sku', 'Bộ lọc cảnh báo tồn', 'Lọc theo shop, mức độ hoặc SKU để gom đúng nhóm cần mua, cấp hàng hoặc thu hồi hàng dư.', 'bottom', 'center'),
+                    self::step('#btn-refresh-all, #btn-ss-filter, .btn[id*="filter"]', 'Tải lại và lọc dữ liệu', 'Sau khi đổi cấu hình hoặc phát sinh phiếu, tải lại để xem trạng thái cảnh báo mới.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('quet ton thong minh', 'smart stock', 'po goi y'), 'Hiện quét tồn thông minh thể hiện ở Trung tâm Cảnh báo: hệ thống so tồn thực tế với min/max để phát hiện thiếu, dư hoặc hết hàng. Kết quả này là đầu vào cho PO/gợi ý mua hoặc điều chuyển.'),
+                    self::knowledge(array('duoi min', 'het hang', 'gap'), 'Dưới min hoặc hết hàng là cảnh báo gấp. Kho cần xem SKU, shop liên quan và quyết định mua thêm hoặc cấp hàng từ nơi còn tồn.'),
+                    self::knowledge(array('tren max', 'du hang', 'thu hoi'), 'Trên max nghĩa là shop đang dư so với cấu hình. Có thể cân nhắc chuyển về kho hoặc điều chuyển sang shop thiếu hàng.'),
+                    self::knowledge(array('batch sap het', 'cam ket ncc', 'cong no'), 'Ngoài tồn shop, các tab batch/cam kết/công nợ giúp kiểm soát hàng theo lô, tiến độ NCC và thanh toán đến hạn.'),
+                ),
+                array('sourceSections' => array('5.1 Quét tồn thông minh', '5.2 Danh sách PO theo gợi ý', '6.1 Cấu hình min/max cho từng mặt hàng'))
+            ),
+
+            'purchase_po' => self::guide(
+                'PO và quét tồn thông minh',
+                'Ngữ cảnh này dùng cho danh sách PO theo gợi ý, tạo PO chủ động hoặc các màn hình quét tồn dựa trên min/max khi được bổ sung vào hệ thống.',
+                array('PO theo gợi ý là gì?', 'Tạo PO chủ động khi nào?', 'Quét tồn sinh đề xuất thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('.kpi-card, .summary-card, .row .card', 'Tổng hợp đề xuất', 'Đọc số SKU thiếu, dư, cần mua, cần cấp hàng hoặc cần điều chuyển trước khi tạo PO.', 'bottom', 'center'),
+                    self::step('form, .filter-grid, select, input[type="search"]', 'Bộ lọc quét/PO', 'Lọc theo shop, kho, NCC, SKU hoặc mức cảnh báo để chỉ tạo yêu cầu cho đúng phạm vi.', 'bottom', 'center'),
+                    self::step('table, .card-datatable, .table-responsive', 'Danh sách đề xuất', 'Kiểm tra từng SKU, tồn hiện tại, min/max, số lượng đề xuất mua/cấp/chuyển và nguồn xử lý.', 'top', 'center'),
+                    self::step('.btn-primary, button[type="submit"], a[href*="po"], a[href*="purchase"]', 'Tạo hoặc xử lý PO', 'Chỉ tạo PO sau khi đã kiểm tra số lượng đề xuất, shop/kho nhận và nguồn hàng/NCC.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('po theo goi y', 'danh sach po quet', 'po quet'), 'PO theo gợi ý được tạo từ kết quả quét tồn thông minh: thiếu ở kho thì gợi ý mua về kho, thiếu ở shop thì gợi ý cấp hàng, dư ở shop thì gợi ý điều chuyển/thu hồi.'),
+                    self::knowledge(array('tao po chu dong', 'po chu dong'), 'Tạo PO chủ động dùng khi cần xin hàng gấp giữa shop/kho hoặc không chờ lịch quét tự động. Vẫn cần nhập đúng nơi yêu cầu, nơi cấp, SKU và số lượng.'),
+                    self::knowledge(array('min max', 'de xuat so luong'), 'Số lượng đề xuất thường dựa trên tồn hiện tại so với mức max mục tiêu. Dưới min là ưu tiên gấp, dưới max là nhu cầu bổ sung kế hoạch.'),
+                    self::knowledge(array('mua', 'cap hang', 'dieu chuyen'), 'Kết quả quét có thể dẫn tới ba hướng: mua thêm từ NCC, cấp hàng từ kho sang shop, hoặc điều chuyển/thu hồi hàng dư từ shop.'),
+                )),
+                array('sourceSections' => array('5. Quét tồn thông minh và PO', '6. Quản lý mua hàng'))
+            ),
+
+            'purchase_stock_config' => self::guide(
+                'Cấu hình Min/Max tồn kho',
+                'Trang này cấu hình ngưỡng min/max theo SKU và site để hệ thống phát hiện thiếu, dư, hết hàng và sinh gợi ý mua/cấp/chuyển.',
+                array('Min và Max dùng thế nào?', 'Shop có cần nhập Min không?', 'Dùng tốc độ bán để gợi ý ra sao?'),
+                array(
+                    self::step('.scp h4, h4', 'Cấu hình cảnh báo tồn kho', 'Xác nhận đúng trang trước khi chỉnh ngưỡng vì dữ liệu ảnh hưởng cảnh báo mua hàng và PO.', 'bottom', 'start'),
+                    self::step('.scp .filter-grid, #scp-filter, form', 'Bộ lọc SKU/site', 'Lọc theo SKU, nhóm hàng, shop/kho hoặc trạng thái để chỉ chỉnh đúng nhóm mặt hàng.', 'bottom', 'center'),
+                    self::step('.site-type-pill, .badge', 'Loại site đang cấu hình', 'Kho thường dùng cả min và max; shop thường tập trung max để biết thiếu/dư hàng cần cấp hoặc thu hồi.', 'bottom', 'center'),
+                    self::step('table, .scp .table', 'Bảng min/max', 'Cập nhật min, max, tồn hiện tại, tốc độ bán và ghi chú theo từng SKU/site.', 'top', 'center'),
+                    self::step('.js-speed-detail, .scp-hint-btn, a[href*="purchase-sell-speed-config"]', 'Gợi ý theo tốc độ bán', 'Dùng dữ liệu tốc độ bán để tham khảo trước khi đặt min/max cho từng mã hàng.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('min max', 'cau hinh ton', 'nguong ton'), 'Min/max là nền cho quét tồn thông minh. Dưới min là cảnh báo gấp, dưới max là nhu cầu bổ sung, trên max là dấu hiệu dư hàng.'),
+                    self::knowledge(array('shop', 'cua hang', 'chi nhanh'), 'Với shop, thường chỉ cần max để xác định thiếu/dư so với mức trưng bày hoặc nhu cầu bán; với kho, min giúp cảnh báo thiếu nguồn cung cho toàn hệ thống.'),
+                    self::knowledge(array('toc do ban', 'goi y min max'), 'Tốc độ bán theo số ngày giúp gợi ý ngưỡng hợp lý hơn thay vì nhập thủ công theo cảm tính.'),
+                    self::knowledge(array('luu', 'cap nhat', 'ghi chu'), 'Sau khi sửa min/max, kiểm tra dòng bị đổi và lưu. Nên ghi chú lý do nếu chỉnh ngưỡng cho SKU quan trọng.'),
+                ),
+                array('sourceSections' => array('6.1 Cấu hình min/max cho từng mặt hàng', '6.2 Cấu hình min/max theo tốc độ bán'))
+            ),
+
+            'purchase_sell_speed_config' => self::guide(
+                'Cài đặt tốc độ bán',
+                'Trang này cấu hình số ngày lấy tốc độ bán theo SKU để hệ thống gợi ý min/max sát nhu cầu thực tế hơn.',
+                array('Tốc độ bán dùng để làm gì?', 'Nên chọn bao nhiêu ngày?', 'Liên quan min/max thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Cài đặt tốc độ bán', 'Xác định khoảng ngày dùng để tính tốc độ bán của từng SKU hoặc nhóm SKU.', 'bottom', 'start'),
+                    self::step('form, select, input[type="number"], input[type="search"]', 'Bộ lọc và cấu hình ngày', 'Tìm SKU và nhập số ngày phù hợp với chu kỳ bán thực tế của mặt hàng.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Danh sách SKU', 'Kiểm tra tốc độ bán, min/max gợi ý và các cấu hình đang áp dụng.', 'top', 'center'),
+                    self::step('.btn-primary, button[type="submit"]', 'Lưu cấu hình', 'Lưu sau khi kiểm tra SKU và số ngày tính tốc độ bán để tránh gợi ý min/max sai.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('toc do ban', 'so ngay', 'window days'), 'Tốc độ bán dùng để ước lượng nhu cầu thực tế. Ví dụ SKU bán nhanh có thể lấy số ngày ngắn hơn để min/max phản ứng nhanh hơn.'),
+                    self::knowledge(array('min max', 'goi y'), 'Cấu hình tốc độ bán là đầu vào cho gợi ý min/max ở kho và shop, từ đó ảnh hưởng cảnh báo thiếu/dư hàng.'),
+                )),
+                array('sourceSections' => array('6.2 Cấu hình min/max theo tốc độ bán', '6.3 Cài đặt tốc độ bán cho từng mã hàng'))
+            ),
+
+            'purchase_contract' => self::guide(
+                'Hợp đồng nhà cung cấp',
+                'Màn hình hợp đồng NCC lưu điều khoản hợp tác, thời hạn, công nợ, chính sách liên quan và dữ liệu nền cho mua hàng theo lô.',
+                array('Hợp đồng NCC lưu gì?', 'Hợp đồng liên quan chính sách thế nào?', 'Khi nào cần xem hợp đồng?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Hợp đồng NCC', 'Kiểm tra danh sách hoặc chi tiết hợp đồng trước khi tạo lô mua/chính sách.', 'bottom', 'start'),
+                    self::step('form, input, select, textarea', 'Thông tin hợp đồng', 'Xem NCC, mã hợp đồng, thời hạn, điều khoản thanh toán và ghi chú quan trọng.', 'top', 'center'),
+                    self::step('table, .table-responsive, .nav-tabs', 'Dữ liệu liên quan', 'Kiểm tra chính sách, lô mua, công nợ hoặc batch gắn với hợp đồng nếu trang có hỗ trợ.', 'top', 'center'),
+                    self::step('.btn-primary, a[href*="purchase-contract-add"], button[type="submit"]', 'Thêm/Lưu hợp đồng', 'Chỉ lưu sau khi đã xác nhận NCC, thời hạn và các điều khoản ảnh hưởng mua hàng.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('hop dong', 'contract', 'ncc'), 'Hợp đồng NCC lưu thỏa thuận lớn như thời hạn, điều khoản thanh toán, cam kết và dữ liệu liên quan tới lô mua/chính sách.'),
+                    self::knowledge(array('chinh sach', 'dieu khoan'), 'Chính sách mua có thể bám theo hợp đồng để áp dụng giá, quà tặng, chiết khấu hoặc điều kiện số lượng.'),
+                    self::knowledge(array('cong no', 'thanh toan'), 'Điều khoản công nợ trong hợp đồng ảnh hưởng ngày đến hạn và cảnh báo thanh toán NCC.'),
+                )),
+                array('sourceSections' => array('7.2 Quản lý hợp đồng và điều khoản'))
+            ),
+
+            'purchase_contract_form' => self::guide(
+                'Thêm/Sửa hợp đồng NCC',
+                'Form hợp đồng dùng để nhập NCC, thời hạn, điều khoản và dữ liệu ràng buộc cho chính sách/lô mua.',
+                array('Trường nào cần kiểm tra?', 'Lưu hợp đồng xong làm gì?', 'Điều khoản ảnh hưởng gì?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .card', 'Form hợp đồng', 'Nhập mã, tiêu đề, NCC, thời hạn và điều khoản hợp đồng.', 'top', 'center'),
+                    self::step('select[name*="supplier"], input[name*="ledger"], .sku-autocomplete', 'Nhà cung cấp', 'Chọn đúng NCC vì hợp đồng sẽ được dùng khi tạo lô mua, chính sách và công nợ.', 'bottom', 'center'),
+                    self::step('textarea, input[name*="term"], input[name*="date"]', 'Thời hạn và điều khoản', 'Kiểm tra ngày hiệu lực, ngày hết hạn, điều khoản thanh toán và ghi chú trước khi lưu.', 'top', 'center'),
+                    self::step('button[type="submit"], .btn-primary', 'Lưu hợp đồng', 'Lưu xong nên mở chi tiết để kiểm tra dữ liệu liên quan hoặc tạo chính sách/lô mua.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('truong bat buoc', 'ncc', 'thoi han'), 'Ưu tiên kiểm tra NCC, mã/tên hợp đồng, thời hạn hiệu lực và điều khoản thanh toán trước khi lưu.'),
+                    self::knowledge(array('sau khi luu', 'tao chinh sach', 'tao lo'), 'Sau khi có hợp đồng, có thể tạo chính sách mua hoặc lô mua gắn với hợp đồng để theo dõi cam kết.'),
+                )),
+                array('sourceSections' => array('7.2 Quản lý hợp đồng và điều khoản'))
+            ),
+
+            'purchase_lot' => self::guide(
+                'Lô mua NCC',
+                'Lô mua dùng để gom nhu cầu mua theo từng đợt, theo NCC, theo SKU và theo cam kết nhập hàng.',
+                array('Lô mua dùng để làm gì?', 'Theo dõi đã nhập ở đâu?', 'Lô mua liên quan phiếu mua thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Lô mua', 'Xác nhận đang xem danh sách hoặc chi tiết lô mua trước khi xử lý kế hoạch nhập hàng.', 'bottom', 'start'),
+                    self::step('a[href*="purchase-lot-add"], .btn-primary', 'Tạo lô mua', 'Tạo lô khi cần gom nhu cầu mua theo NCC hoặc theo một đợt hàng cụ thể.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Danh sách/SKU trong lô', 'Kiểm tra SKU, số lượng cam kết, đã nhập, còn lại và trạng thái xử lý.', 'top', 'center'),
+                    self::step('.nav-tabs, .card, form', 'Thông tin liên quan', 'Xem hợp đồng, chính sách, batch hoặc phiếu nhập liên quan tới lô mua nếu có.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('lo mua', 'ke hoach mua', 'purchase lot'), 'Lô mua giúp gom nhu cầu mua theo NCC/đợt hàng, theo dõi SKU cần mua, số lượng cam kết, đã nhập và còn lại.'),
+                    self::knowledge(array('da nhap', 'con lai', 'committed'), 'Các cột đã nhập/còn lại dùng để biết tiến độ thực hiện lô mua sau khi phát sinh phiếu mua hoặc phiếu nhập.'),
+                    self::knowledge(array('hop dong', 'chinh sach'), 'Lô mua có thể gắn hợp đồng hoặc chính sách mua để theo dõi điều khoản NCC trong cùng một đợt hàng.'),
+                )),
+                array('sourceSections' => array('7.1 Lên kế hoạch mua hàng theo lô mua'))
+            ),
+
+            'purchase_lot_form' => self::guide(
+                'Tạo lô mua',
+                'Form tạo lô mua dùng để chọn NCC/hợp đồng/chính sách và khai báo các SKU cần mua trong một kế hoạch.',
+                array('Tạo lô mua bắt đầu ở đâu?', 'Thêm SKU vào lô thế nào?', 'Cần kiểm tra gì trước khi lưu?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .card', 'Form lô mua', 'Nhập tiêu đề, NCC, hợp đồng/chính sách và thông tin kế hoạch mua.', 'top', 'center'),
+                    self::step('.sku-autocomplete, input[name*="sku"], #lot-items, table', 'SKU trong lô', 'Thêm đúng SKU, số lượng cam kết, giá hoặc ghi chú theo nhu cầu mua.', 'top', 'center'),
+                    self::step('select[name*="contract"], select[name*="policy"]', 'Hợp đồng/chính sách liên quan', 'Gắn đúng hợp đồng hoặc chính sách để sau này theo dõi cam kết và ưu đãi NCC.', 'bottom', 'center'),
+                    self::step('button[type="submit"], .btn-primary', 'Lưu lô mua', 'Lưu sau khi kiểm tra NCC, danh sách SKU, số lượng và điều khoản liên quan.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('them sku', 'san pham trong lo'), 'Thêm SKU vào lô mua kèm số lượng cần mua/cam kết. Sai SKU hoặc số lượng sẽ làm lệch kế hoạch nhập hàng.'),
+                    self::knowledge(array('hop dong', 'chinh sach', 'ncc'), 'Nên gắn đúng NCC, hợp đồng và chính sách để lô mua có đủ ngữ cảnh khi tạo phiếu mua và đối soát.'),
+                )),
+                array('sourceSections' => array('7.1 Lên kế hoạch mua hàng theo lô mua'))
+            ),
+
+            'purchase_policy' => self::guide(
+                'Chính sách mua hàng',
+                'Chính sách mua lưu các điều khoản ưu đãi từ NCC như giá theo số lượng, hàng tặng, combo, chiết khấu, thuế và điều kiện áp dụng.',
+                array('Chính sách mua dùng để làm gì?', 'Có những loại điều khoản nào?', 'Áp dụng chính sách vào đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Chính sách mua', 'Kiểm tra danh sách hoặc chi tiết chính sách trước khi áp dụng vào lô mua/phiếu mua.', 'bottom', 'start'),
+                    self::step('table, .table-responsive', 'Danh sách điều khoản', 'Xem mã, tiêu đề, loại điều khoản, trạng thái, thời hạn và NCC/hợp đồng liên quan.', 'top', 'center'),
+                    self::step('.nav-tabs, .policy-items, #policy-items-tbody', 'Điều khoản chính sách', 'Đọc các dòng áp dụng giá, quà tặng, combo, chiết khấu hoặc điều kiện mua.', 'top', 'center'),
+                    self::step('a[href*="purchase-policy-add"], .btn-primary, button[type="submit"]', 'Thêm/Sửa chính sách', 'Chỉ chỉnh khi đã hiểu phạm vi áp dụng vì chính sách có thể ảnh hưởng giá mua và quà tặng.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('chinh sach mua', 'policy'), 'Chính sách mua giúp lưu điều khoản NCC: mua đủ số lượng được giá tốt, được tặng hàng, combo, chiết khấu hoặc điều kiện thanh toán.'),
+                    self::knowledge(array('hang tang', 'qua tang', 'giam gia', 'combo'), 'Các điều khoản có thể là giá theo SKU/số lượng, hàng tặng, combo mua kèm hoặc giảm giá theo điều kiện.'),
+                    self::knowledge(array('ap dung', 'phieu mua', 'lo mua'), 'Chính sách thường được gắn vào hợp đồng/lô mua/phiếu mua để hệ thống gợi ý giá, quà tặng hoặc điều kiện liên quan.'),
+                )),
+                array('sourceSections' => array('7.2 Quản lý hợp đồng và điều khoản'))
+            ),
+
+            'purchase_policy_form' => self::guide(
+                'Thêm/Sửa chính sách mua',
+                'Form chính sách mua dùng để khai báo thông tin chính sách và các dòng điều khoản áp dụng theo SKU, số lượng, quà tặng hoặc combo.',
+                array('Tạo chính sách mua thế nào?', 'Thêm điều khoản ở đâu?', 'Import điều khoản từ chính sách khác được không?'),
+                array_merge($generic_steps, array(
+                    self::step('#form-add-policy, form', 'Thông tin chính sách', 'Nhập mã, tiêu đề, NCC, hợp đồng/lô liên quan, thời hạn và trạng thái chính sách.', 'top', 'center'),
+                    self::step('#btn-add-policy-item, #policy-items-tbody, .policy-items', 'Điều khoản chính sách', 'Thêm từng dòng điều khoản về giá, hàng tặng, combo, chiết khấu hoặc điều kiện áp dụng.', 'top', 'center'),
+                    self::step('#btn-import-from-policy, #modalImportPolicy', 'Import điều khoản', 'Có thể nhập lại điều khoản từ chính sách khác nếu cần tái sử dụng bộ quy tắc cũ.', 'bottom', 'center'),
+                    self::step('#policy-prod-search, .sku-autocomplete, input[name*="sku"]', 'Chọn SKU áp dụng', 'Tìm đúng SKU hoặc tạo nhanh sản phẩm khi chưa có trong hệ thống.', 'bottom', 'center'),
+                    self::step('button[type="submit"], .btn-primary', 'Lưu chính sách', 'Lưu sau khi kiểm tra mã chính sách, phạm vi áp dụng, thời hạn và từng điều khoản.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('them dieu khoan', 'policy item'), 'Bấm thêm điều khoản để khai báo từng quy tắc: giá theo số lượng, hàng tặng, combo, chiết khấu, thuế hoặc điều kiện thanh toán.'),
+                    self::knowledge(array('import dieu khoan', 'sao chep'), 'Import từ chính sách khác sẽ giúp tái sử dụng bộ điều khoản, nhưng cần kiểm tra vì có thể thay thế các dòng đang nhập.'),
+                    self::knowledge(array('sku', 'san pham ap dung'), 'SKU áp dụng quyết định chính sách có match với phiếu mua hay không. Chọn sai SKU sẽ làm gợi ý giá/quà tặng sai.'),
+                )),
+                array('sourceSections' => array('7.2 Quản lý hợp đồng và điều khoản'))
+            ),
+
+            'purchase_batch' => self::guide(
+                'Quản lý batch/lô hàng nhập',
+                'Batch dùng để theo dõi hàng đã nhập theo SKU, nguồn mua, lô mua, hợp đồng, chính sách, số lượng còn lại và giá vốn bình quân.',
+                array('Batch là gì?', 'Batch sinh từ đâu?', 'Khi nào cần xem batch?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Batch hàng nhập', 'Xem các batch được sinh từ phiếu mua/nhập để truy xuất nguồn hàng và giá vốn.', 'bottom', 'start'),
+                    self::step('table, .table-responsive', 'Danh sách batch', 'Kiểm tra mã batch, SKU, số lượng nhập, còn lại, giá vốn, lô mua và hợp đồng/chính sách liên quan.', 'top', 'center'),
+                    self::step('form, select, input[type="search"]', 'Tìm/lọc batch', 'Lọc theo SKU, NCC, lô mua, trạng thái hoặc thời gian để phục vụ đối soát.', 'bottom', 'center'),
+                    self::step('.nav-tabs, .card, #movement-table', 'Chi tiết và lịch sử', 'Ở trang chi tiết, xem phân bổ, lịch sử dịch chuyển và dữ liệu nguồn của batch.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('batch', 'lo hang nhap'), 'Batch là nhóm hàng nhập theo SKU/nguồn mua, giúp truy xuất giá vốn, số lượng còn lại, lô mua, hợp đồng và chính sách liên quan.'),
+                    self::knowledge(array('sinh tu dau', 'phieu mua', 'auto'), 'Batch thường được sinh tự động sau phiếu mua/nhập, gom các dòng cùng SKU và lưu snapshot dữ liệu nguồn.'),
+                    self::knowledge(array('gia von', 'so luong con lai'), 'Giá vốn bình quân và số lượng còn lại trong batch phục vụ báo cáo, đối soát và cảnh báo batch sắp hết.'),
+                )),
+                array('sourceSections' => array('7. Lô mua và hợp đồng'))
+            ),
+
+            'purchase_payment' => self::guide(
+                'Công nợ nhà cung cấp',
+                'Màn hình công nợ NCC theo dõi số tiền phải trả, hạn thanh toán, hợp đồng/lô mua liên quan và trạng thái quá hạn.',
+                array('Công nợ NCC xem ở đâu?', 'Nợ quá hạn xử lý thế nào?', 'Liên quan hợp đồng ra sao?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Công nợ NCC', 'Theo dõi công nợ phát sinh từ mua hàng, lô mua, batch và hợp đồng.', 'bottom', 'start'),
+                    self::step('form, select, input[type="search"]', 'Bộ lọc công nợ', 'Lọc theo NCC, hợp đồng, trạng thái thanh toán hoặc thời hạn để ưu tiên xử lý.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Bảng công nợ', 'Đọc tổng tiền, còn phải trả, ngày đến hạn, hợp đồng/lô mua và trạng thái quá hạn.', 'top', 'center'),
+                    self::step('.btn-primary, a[href*="purchase-payment-detail"], button[type="submit"]', 'Chi tiết/thanh toán', 'Mở chi tiết để kiểm tra nguồn phát sinh hoặc ghi nhận thanh toán nếu quy trình hỗ trợ.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('cong no ncc', 'phai tra', 'thanh toan'), 'Công nợ NCC theo dõi khoản phải trả từ phiếu mua/lô mua/batch, gồm tổng tiền, còn lại, ngày đến hạn và trạng thái thanh toán.'),
+                    self::knowledge(array('qua han', 'den han'), 'Nợ quá hạn cần ưu tiên xử lý hoặc đối chiếu với hợp đồng/điều khoản thanh toán đã lưu.'),
+                    self::knowledge(array('hop dong', 'lo mua'), 'Công nợ có thể gắn hợp đồng, lô mua và batch để kế toán truy ngược nguồn phát sinh.'),
+                )),
+                array('sourceSections' => array('7.2 Quản lý hợp đồng và điều khoản'))
             ),
 
             'supplier_migration' => self::guide(
@@ -1338,6 +1727,217 @@ final class TGS_AI_Guides_Registry
                 array('sourceSections' => array('8. Quản lý bán hàng ở POS', '9. Zalo OA', '10. Hóa đơn Viettel'))
             ),
 
+            'transfer_internal' => self::guide(
+                'Luân chuyển hàng nội bộ',
+                'Nhóm màn hình mua bán/trả hàng nội bộ dùng để điều phối hàng giữa kho và shop, hoặc giữa các điểm trong hệ thống.',
+                array('Luân chuyển nội bộ gồm gì?', 'Khi nào bán/mua nội bộ?', 'Trả hàng nội bộ khác gì?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Nghiệp vụ nội bộ', 'Xác định đang thao tác bán nội bộ, mua nội bộ, trả nội bộ, nhận trả hay báo cáo.', 'bottom', 'start'),
+                    self::step('form, table, .card', 'Vùng xử lý chính', 'Kiểm tra shop gửi, shop nhận, sản phẩm, số lượng và trạng thái xử lý trước khi lưu.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('luan chuyen', 'noi bo', 'mua ban noi bo'), 'Luân chuyển nội bộ gồm bán hàng nội bộ từ nơi gửi, mua/nhận nội bộ ở nơi nhận, và trả/nhận trả khi shop trả hàng về kho hoặc điểm khác.'),
+                    self::knowledge(array('kho sang shop', 'shop sang shop'), 'Dùng bán/mua nội bộ khi cần cấp hàng từ kho sang shop hoặc điều phối hàng giữa các điểm.'),
+                    self::knowledge(array('tra hang noi bo'), 'Trả hàng nội bộ dùng khi shop trả hàng dư, hàng bán chậm hoặc cần gom về kho để quản lý lại.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ', '4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_report' => self::guide(
+                'Báo cáo mua bán nội bộ',
+                'Báo cáo nội bộ giúp theo dõi luồng hàng đi/đến, trạng thái phiếu, chênh lệch nhận hàng và hiệu quả điều phối giữa các shop/kho.',
+                array('Báo cáo nội bộ xem gì?', 'Lọc theo shop ở đâu?', 'Theo dõi phiếu lệch thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Báo cáo nội bộ', 'Xem tổng quan luân chuyển hàng giữa các site trước khi đi vào phiếu cụ thể.', 'bottom', 'start'),
+                    self::step('form, select, input[type="date"], input[type="search"]', 'Bộ lọc báo cáo', 'Lọc theo thời gian, shop gửi, shop nhận, loại phiếu hoặc trạng thái để đối soát.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Bảng kết quả', 'Đọc số lượng, giá trị, trạng thái xuất/nhập/trả/nhận trả và mở chi tiết khi cần.', 'top', 'center'),
+                    self::step('.btn-primary, button[name*="export"], a[href*="export"]', 'Xuất hoặc tải lại', 'Xuất báo cáo sau khi đã lọc đúng phạm vi cần gửi quản lý/kế toán/kho.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('bao cao noi bo', 'dieu chuyen'), 'Báo cáo nội bộ dùng để đối soát luồng hàng giữa nơi gửi và nơi nhận, theo trạng thái phiếu và thời gian.'),
+                    self::knowledge(array('chenh lech', 'mismatch', 'nhan thuc te'), 'Nếu số lượng nhận thực tế khác số xuất, cần mở chi tiết phiếu để kiểm tra xác nhận chênh lệch.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ', '4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_export' => self::guide(
+                'Tạo phiếu bán nội bộ',
+                'Phiếu bán nội bộ ghi nhận nơi gửi xuất hàng cho shop/kho nhận trong luồng điều phối hàng nội bộ.',
+                array('Tạo bán nội bộ bắt đầu ở đâu?', 'Chọn shop nhận thế nào?', 'Cần kiểm tra sản phẩm gì?'),
+                array(
+                    self::step('h4, .card-title', 'Bán hàng nội bộ', 'Xác nhận đúng nghiệp vụ xuất hàng từ nơi gửi sang nơi nhận.', 'bottom', 'start'),
+                    self::step('form, #transferExportForm, .card', 'Thông tin phiếu', 'Chọn shop/kho nhận, ghi chú và thông tin chứng từ nội bộ.', 'top', 'center'),
+                    self::step('table, #transferProductsTable, .product-list', 'Sản phẩm xuất', 'Thêm sản phẩm, số lượng, mã định danh/HSD nếu có và kiểm tra tồn trước khi lưu.', 'top', 'center'),
+                    self::step('button[type="submit"], .btn-primary, .btn-success', 'Lưu phiếu bán nội bộ', 'Lưu sau khi xác nhận nơi nhận, sản phẩm và số lượng thực xuất.', 'left', 'center'),
+                ),
+                array(
+                    self::knowledge(array('ban noi bo', 'xuat noi bo'), 'Bán nội bộ là bước nơi gửi xuất hàng cho nơi nhận. Phiếu này là đầu vào để phía nhận tạo/hoàn tất mua nội bộ.'),
+                    self::knowledge(array('shop nhan', 'noi nhan'), 'Chọn đúng shop/kho nhận vì sai điểm nhận sẽ làm lệch luồng hàng và báo cáo điều phối.'),
+                    self::knowledge(array('so luong', 'ma dinh danh', 'hsd'), 'Kiểm tra số lượng, HSD/mã định danh nếu sản phẩm tracking trước khi lưu phiếu.'),
+                ),
+                array('sourceSections' => array('4.5 Mua bán nội bộ'))
+            ),
+
+            'transfer_export_list' => self::guide(
+                'Danh sách phiếu bán nội bộ',
+                'Danh sách phiếu bán nội bộ dùng để tìm, lọc, mở chi tiết và theo dõi trạng thái hàng đã xuất sang điểm nhận.',
+                array('Tìm phiếu bán nội bộ thế nào?', 'Trạng thái phiếu nghĩa là gì?', 'Mở chi tiết ở đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('form, input[type="search"], select', 'Tìm/lọc phiếu', 'Lọc theo thời gian, shop nhận, trạng thái hoặc mã phiếu để tìm đúng chứng từ.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Bảng phiếu bán nội bộ', 'Kiểm tra mã phiếu, nơi nhận, số lượng, trạng thái và mở chi tiết.', 'top', 'center'),
+                    self::step('a[href*="transfer-export-add"], .btn-primary', 'Tạo phiếu mới', 'Tạo bán nội bộ mới khi cần cấp hàng hoặc điều phối hàng sang điểm khác.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('danh sach ban noi bo', 'phieu ban noi bo'), 'Dùng danh sách bán nội bộ để theo dõi các phiếu đã xuất từ nơi gửi sang nơi nhận và mở chi tiết để đối soát.'),
+                    self::knowledge(array('trang thai', 'cho nhan'), 'Trạng thái cho biết phiếu đã được nơi nhận xử lý hay còn chờ mua/nhập nội bộ.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ'))
+            ),
+
+            'transfer_pending_import' => self::guide(
+                'Phiếu chờ mua từ shop bán',
+                'Màn hình này liệt kê các phiếu bán nội bộ đang chờ bên nhận tạo hoặc hoàn tất phiếu mua nội bộ.',
+                array('Phiếu chờ mua là gì?', 'Nhận hàng nội bộ ở đâu?', 'Chênh lệch xử lý sao?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Chờ mua từ shop bán', 'Đây là hàng đã được bên gửi xuất và đang chờ bên nhận xử lý.', 'bottom', 'start'),
+                    self::step('table, .table-responsive', 'Danh sách chờ nhận/mua', 'Kiểm tra nơi gửi, mã phiếu gốc, sản phẩm, số lượng và trạng thái chờ xử lý.', 'top', 'center'),
+                    self::step('.btn-primary, a[href*="transfer-import-add"], button[data-action]', 'Tạo mua nội bộ', 'Mở luồng mua/nhận nội bộ từ phiếu đang chờ và kiểm tra số lượng thực nhận.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('cho mua', 'pending import', 'shop ban'), 'Phiếu chờ mua là phiếu bán nội bộ đã xuất từ nơi gửi, đang chờ nơi nhận xác nhận mua/nhập nội bộ.'),
+                    self::knowledge(array('chenh lech', 'nhan thuc te'), 'Nếu nhận thực tế lệch so với xuất, cần ghi nhận chênh lệch theo modal xác nhận trước khi hoàn tất.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ'))
+            ),
+
+            'transfer_import' => self::guide(
+                'Tạo phiếu mua nội bộ',
+                'Phiếu mua nội bộ là bước nơi nhận xác nhận hàng từ phiếu bán nội bộ hoặc tạo luồng nhận hàng điều phối.',
+                array('Mua nội bộ bắt đầu từ đâu?', 'Nhận từ phiếu bán thế nào?', 'Kiểm tra chênh lệch ra sao?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .card', 'Thông tin nhận hàng', 'Chọn phiếu nguồn/nơi gửi và kiểm tra thông tin chứng từ.', 'top', 'center'),
+                    self::step('table, .product-list, .transfer-items', 'Sản phẩm nhận', 'Kiểm tra số lượng xuất, số lượng nhận thực tế, HSD/mã định danh và ghi chú lệch nếu có.', 'top', 'center'),
+                    self::step('#transferMismatchConfirmModal, .tgs-row-mismatch', 'Xác nhận chênh lệch', 'Nếu số lượng nhận khác số xuất, đọc kỹ cảnh báo và xác nhận lý do trước khi lưu.', 'left', 'center'),
+                    self::step('button[type="submit"], .btn-primary, .btn-success', 'Hoàn tất mua nội bộ', 'Chỉ lưu khi đã đối chiếu sản phẩm, số lượng và chênh lệch với bên gửi.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('mua noi bo', 'nhan hang'), 'Mua nội bộ là bước nơi nhận xác nhận hàng từ nơi gửi để hoàn tất luồng điều phối.'),
+                    self::knowledge(array('chenh lech', 'mismatch'), 'Chênh lệch xảy ra khi số lượng nhận thực tế khác số xuất. Cần ghi nhận rõ để báo cáo và tồn kho không lệch.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ'))
+            ),
+
+            'transfer_import_list' => self::guide(
+                'Danh sách phiếu mua nội bộ',
+                'Danh sách phiếu mua nội bộ dùng để theo dõi các phiếu đã nhận hàng từ shop/kho gửi và đối soát trạng thái nhập.',
+                array('Xem phiếu mua nội bộ ở đâu?', 'Lọc theo nơi gửi thế nào?', 'Mở chi tiết để đối soát gì?'),
+                array_merge($generic_steps, array(
+                    self::step('form, input[type="search"], select', 'Tìm/lọc phiếu mua nội bộ', 'Lọc theo thời gian, nơi gửi, trạng thái hoặc mã phiếu.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Bảng phiếu mua nội bộ', 'Kiểm tra mã phiếu, nơi gửi, số lượng nhận, trạng thái và chi tiết.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('danh sach mua noi bo', 'phieu mua noi bo'), 'Dùng danh sách mua nội bộ để đối soát các phiếu đã nhận hàng và liên kết với phiếu bán nội bộ nguồn.'),
+                    self::knowledge(array('noi gui', 'nguon hang'), 'Lọc theo nơi gửi giúp kiểm tra shop/kho nào đã cấp hàng và trạng thái nhận của từng phiếu.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ'))
+            ),
+
+            'transfer_return' => self::guide(
+                'Tạo phiếu trả hàng nội bộ',
+                'Phiếu trả hàng nội bộ dùng khi shop/kho trả hàng dư, hàng bán chậm hoặc hàng cần gom về điểm khác.',
+                array('Khi nào trả hàng nội bộ?', 'Chọn nơi nhận trả thế nào?', 'Kiểm tra sản phẩm trả ở đâu?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Trả hàng nội bộ', 'Xác nhận đúng nghiệp vụ trả hàng từ nơi hiện tại về nơi nhận trả.', 'bottom', 'start'),
+                    self::step('form, .card', 'Thông tin trả hàng', 'Chọn nơi nhận trả, lý do trả, ghi chú và phiếu liên quan nếu có.', 'top', 'center'),
+                    self::step('table, .product-list, .transfer-items', 'Sản phẩm trả', 'Thêm sản phẩm, số lượng, mã định danh/HSD nếu có và kiểm tra lý do trả.', 'top', 'center'),
+                    self::step('button[type="submit"], .btn-primary, .btn-success', 'Lưu phiếu trả', 'Lưu sau khi xác nhận nơi nhận, sản phẩm và số lượng trả thực tế.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('tra hang noi bo', 'hang du', 'ban cham'), 'Trả hàng nội bộ dùng khi shop dư hàng, hàng bán chậm hoặc cần gom hàng về kho/điểm khác để điều phối lại.'),
+                    self::knowledge(array('noi nhan tra', 'kho nhan'), 'Chọn đúng nơi nhận trả để luồng nhận trả và báo cáo nội bộ khớp.'),
+                )),
+                array('sourceSections' => array('4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_return_list' => self::guide(
+                'Danh sách phiếu trả nội bộ',
+                'Danh sách phiếu trả nội bộ theo dõi các yêu cầu trả hàng đã tạo và trạng thái bên nhận xử lý.',
+                array('Theo dõi phiếu trả ở đâu?', 'Phiếu trả chờ nhận là gì?', 'Mở chi tiết thế nào?'),
+                array_merge($generic_steps, array(
+                    self::step('form, input[type="search"], select', 'Tìm/lọc phiếu trả', 'Lọc theo thời gian, nơi nhận trả, trạng thái hoặc mã phiếu.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Bảng phiếu trả nội bộ', 'Kiểm tra mã phiếu, nơi nhận trả, số lượng, trạng thái và mở chi tiết.', 'top', 'center'),
+                    self::step('a[href*="transfer-return-add"], .btn-primary', 'Tạo phiếu trả mới', 'Tạo khi cần gom hàng dư hoặc trả hàng từ shop về kho/điểm khác.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('danh sach tra noi bo', 'phieu tra noi bo'), 'Danh sách trả nội bộ giúp theo dõi phiếu đã tạo và biết phiếu nào đang chờ bên nhận xác nhận.'),
+                )),
+                array('sourceSections' => array('4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_pending_return' => self::guide(
+                'Chờ nhận từ shop trả',
+                'Màn hình này liệt kê các phiếu trả nội bộ đang chờ bên nhận xác nhận hàng trả về.',
+                array('Chờ nhận trả là gì?', 'Nhận trả nội bộ ở đâu?', 'Có lệch số lượng thì sao?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Chờ nhận trả', 'Đây là các phiếu trả đã tạo và đang chờ nơi nhận xử lý.', 'bottom', 'start'),
+                    self::step('table, .table-responsive', 'Danh sách chờ nhận trả', 'Kiểm tra nơi trả, nơi nhận, sản phẩm, số lượng và trạng thái.', 'top', 'center'),
+                    self::step('.btn-primary, a[href*="transfer-return-receive-add"], button[data-action]', 'Tạo nhận trả', 'Mở luồng nhận trả để xác nhận hàng thực tế về kho/điểm nhận.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('cho nhan tra', 'pending return'), 'Chờ nhận trả là các phiếu trả nội bộ cần nơi nhận xác nhận số lượng thực nhận.'),
+                    self::knowledge(array('lech so luong', 'chenh lech'), 'Nếu số lượng nhận trả khác số trả, cần ghi nhận chênh lệch để đối soát tồn kho.'),
+                )),
+                array('sourceSections' => array('4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_return_receive' => self::guide(
+                'Nhận trả nội bộ',
+                'Nhận trả nội bộ là bước nơi nhận xác nhận hàng được shop/kho khác trả về.',
+                array('Nhận trả bắt đầu từ đâu?', 'Kiểm tra hàng thực nhận thế nào?', 'Hoàn tất nhận trả ra sao?'),
+                array_merge($generic_steps, array(
+                    self::step('form, .card', 'Thông tin nhận trả', 'Chọn phiếu trả nguồn/nơi trả và kiểm tra thông tin chứng từ.', 'top', 'center'),
+                    self::step('table, .product-list, .transfer-items', 'Sản phẩm nhận trả', 'Đối chiếu số lượng trả và số lượng nhận thực tế, mã định danh/HSD nếu có.', 'top', 'center'),
+                    self::step('#transferMismatchConfirmModal, .tgs-row-mismatch', 'Xác nhận chênh lệch', 'Nếu số nhận trả khác số trả, xác nhận chênh lệch trước khi hoàn tất.', 'left', 'center'),
+                    self::step('button[type="submit"], .btn-primary, .btn-success', 'Hoàn tất nhận trả', 'Lưu sau khi đã kiểm tra sản phẩm, số lượng và lý do chênh lệch nếu có.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('nhan tra noi bo', 'hang tra ve'), 'Nhận trả nội bộ giúp nơi nhận xác nhận hàng trả về để tồn kho và báo cáo điều phối được cập nhật đúng.'),
+                    self::knowledge(array('so luong thuc nhan', 'chenh lech'), 'Luôn đối chiếu số lượng thực nhận với phiếu trả nguồn, đặc biệt với sản phẩm tracking/HSD.'),
+                )),
+                array('sourceSections' => array('4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_return_receive_list' => self::guide(
+                'Danh sách phiếu nhận trả nội bộ',
+                'Danh sách nhận trả nội bộ dùng để theo dõi các phiếu đã xác nhận hàng trả về và đối soát với phiếu trả nguồn.',
+                array('Xem phiếu nhận trả ở đâu?', 'Đối soát với phiếu trả thế nào?', 'Lọc theo nơi trả ra sao?'),
+                array_merge($generic_steps, array(
+                    self::step('form, input[type="search"], select', 'Tìm/lọc nhận trả', 'Lọc theo thời gian, nơi trả, nơi nhận, trạng thái hoặc mã phiếu.', 'bottom', 'center'),
+                    self::step('table, .table-responsive', 'Bảng phiếu nhận trả', 'Kiểm tra mã phiếu, nơi trả, số lượng nhận, trạng thái và mở chi tiết.', 'top', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('danh sach nhan tra', 'phieu nhan tra'), 'Danh sách nhận trả giúp đối soát hàng đã nhận lại với phiếu trả nguồn và phát hiện chênh lệch nếu có.'),
+                )),
+                array('sourceSections' => array('4.6 Trả hàng nội bộ'))
+            ),
+
+            'transfer_detail' => self::guide(
+                'Chi tiết phiếu nội bộ',
+                'Trang chi tiết phiếu nội bộ dùng để đối soát nơi gửi/nhận, sản phẩm, số lượng, trạng thái, lịch sử và chênh lệch nếu có.',
+                array('Chi tiết phiếu nội bộ xem gì?', 'Đối soát số lượng ở đâu?', 'Trạng thái phiếu ảnh hưởng gì?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title', 'Chi tiết phiếu', 'Kiểm tra mã phiếu, loại nghiệp vụ, nơi gửi, nơi nhận và trạng thái hiện tại.', 'bottom', 'start'),
+                    self::step('.card, .ticket-info-card, form', 'Thông tin chứng từ', 'Đọc thông tin nơi gửi/nhận, ghi chú, ngày tạo và liên kết phiếu nguồn nếu có.', 'bottom', 'center'),
+                    self::step('table, .product-list, .transfer-items', 'Sản phẩm trong phiếu', 'Đối chiếu từng SKU, số lượng xuất/trả/nhận, HSD/mã định danh và chênh lệch.', 'top', 'center'),
+                    self::step('.timeline, .status, .badge, .nav-tabs', 'Trạng thái và lịch sử', 'Theo dõi tiến độ xử lý, lịch sử cập nhật và các trạng thái liên quan.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('chi tiet phieu noi bo', 'doi soat'), 'Mở chi tiết phiếu để đối soát nơi gửi/nhận, số lượng, sản phẩm, trạng thái và chênh lệch phát sinh.'),
+                    self::knowledge(array('trang thai', 'lich su'), 'Trạng thái cho biết phiếu đang chờ, đã xuất, đã nhận, đã trả hoặc đã hoàn tất. Lịch sử giúp truy nguyên thao tác.'),
+                )),
+                array('sourceSections' => array('4.5 Mua bán nội bộ', '4.6 Trả hàng nội bộ'))
+            ),
+
             'guide_settings' => self::guide(
                 'Cấu hình AI hướng dẫn',
                 'Trang này cho biết plugin hướng dẫn đang hoạt động, coverage theo view và các hook để mở rộng tour hoặc nối AI thật.',
@@ -1378,15 +1978,16 @@ final class TGS_AI_Guides_Registry
         );
     }
 
-    private static function step($element, $title, $description, $side = 'bottom', $align = 'center')
+    private static function step($element, $title, $description, $side = 'bottom', $align = 'center', $meta = array())
     {
-        return array(
+        return array_merge(array(
             'element' => $element,
             'title' => $title,
             'description' => $description,
             'side' => $side,
             'align' => $align,
-        );
+            'scope' => 'page',
+        ), $meta);
     }
 
     private static function knowledge($terms, $answer)

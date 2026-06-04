@@ -10,7 +10,9 @@
         panelOpen: false,
         activeDriver: null,
         markedSeen: false,
-        typingNode: null
+        typingNode: null,
+        chatScope: 'page',
+        lastTourHadGlobalSteps: false
     };
 
     function ready(callback) {
@@ -32,6 +34,47 @@
 
     function requestErrorMessage(error) {
         return error && error.message ? error.message : label('requestFailed', 'Không gọi được khung hỗ trợ lúc này. Vui lòng thử lại sau.');
+    }
+
+    function globalStepsStorageKey() {
+        return [
+            'tgs_ai_guides_global_steps_seen',
+            config.siteId || 0,
+            config.userId || 0,
+            config.tour.version || 'v1'
+        ].join('_');
+    }
+
+    function getGlobalStepCooldownMs() {
+        var minutes = Number(config.globalStepCooldownMinutes);
+        if (!isFinite(minutes)) {
+            minutes = 180;
+        }
+        return Math.max(0, minutes) * 60 * 1000;
+    }
+
+    function isGlobalStep(step) {
+        return step && step.scope === 'global';
+    }
+
+    function areGlobalStepsDue() {
+        var cooldown = getGlobalStepCooldownMs();
+        if (cooldown <= 0) {
+            return true;
+        }
+
+        try {
+            var lastSeen = Number(window.localStorage.getItem(globalStepsStorageKey()) || 0);
+            return !lastSeen || (Date.now() - lastSeen) >= cooldown;
+        } catch (error) {
+            return true;
+        }
+    }
+
+    function markGlobalStepsSeen() {
+        try {
+            window.localStorage.setItem(globalStepsStorageKey(), String(Date.now()));
+        } catch (error) {}
     }
 
     function getDriverFactory() {
@@ -147,6 +190,10 @@
                     '<button type="button" class="tgs-ai-guide-action" data-tgs-ai-replay><i class="bx bx-play"></i><span></span></button>',
                     '<button type="button" class="tgs-ai-guide-action" data-tgs-ai-skip><i class="bx bx-hide"></i><span></span></button>',
                 '</div>',
+                '<div class="tgs-ai-guide-scope" role="group" aria-label="Phạm vi hỏi đáp">',
+                    '<button type="button" class="is-active" data-tgs-ai-scope="page"></button>',
+                    '<button type="button" data-tgs-ai-scope="project"></button>',
+                '</div>',
                 '<div class="tgs-ai-guide-messages" role="log" aria-live="polite"></div>',
                 '<div class="tgs-ai-guide-quick"></div>',
             '</div>',
@@ -163,6 +210,8 @@
         panel.querySelector('.tgs-ai-guide-panel__subtitle').textContent = config.tour.title + ' - ' + config.labels.panelSubtitle;
         panel.querySelector('[data-tgs-ai-replay] span').textContent = config.labels.replayTour;
         panel.querySelector('[data-tgs-ai-skip] span').textContent = config.labels.skipPage;
+        panel.querySelector('[data-tgs-ai-scope="page"]').textContent = label('scopePage', 'Trang này');
+        panel.querySelector('[data-tgs-ai-scope="project"]').textContent = label('scopeProject', 'Toàn dự án');
         panel.querySelector('.tgs-ai-guide-input').setAttribute('placeholder', config.labels.askPlaceholder);
         panel.querySelector('.tgs-ai-guide-send span').textContent = config.labels.send;
 
@@ -203,6 +252,21 @@
             }
             input.value = '';
             ask(question);
+        });
+
+        panel.querySelectorAll('[data-tgs-ai-scope]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                state.chatScope = button.getAttribute('data-tgs-ai-scope') === 'project' ? 'project' : 'page';
+                panel.querySelectorAll('[data-tgs-ai-scope]').forEach(function (item) {
+                    item.classList.toggle('is-active', item === button);
+                });
+                renderQuickQuestions(state.chatScope === 'project' ? [
+                    'Quét tồn thông minh dùng thế nào?',
+                    'PO theo gợi ý và PO chủ động khác gì?',
+                    'Cấu hình min/max tồn kho ở đâu?',
+                    'Luân chuyển nội bộ gồm những bước nào?'
+                ] : (config.tour.quickQuestions || []));
+            });
         });
 
         document.addEventListener('click', function (event) {
@@ -323,7 +387,8 @@
         post('tgs_ai_guides_chat', {
             page: config.page || 'tgs-shop-management',
             view: config.view,
-            question: question
+            question: question,
+            scope: state.chatScope
         }).then(function (response) {
             showTyping(false);
             if (!response || !response.success || !response.data) {
@@ -386,11 +451,21 @@
     function buildDriverSteps() {
         var rawSteps = config.tour.steps || [];
         var steps = [];
+        var globalStepsDue = areGlobalStepsDue();
+        var includedGlobalSteps = false;
 
         rawSteps.forEach(function (step) {
+            if (isGlobalStep(step) && !globalStepsDue) {
+                return;
+            }
+
             var element = queryStepElement(step.element);
             if (step.element && !element) {
                 return;
+            }
+
+            if (isGlobalStep(step)) {
+                includedGlobalSteps = true;
             }
 
             steps.push({
@@ -403,6 +478,8 @@
                 }
             });
         });
+
+        state.lastTourHadGlobalSteps = includedGlobalSteps;
 
         if (!steps.length) {
             steps.push({
@@ -468,6 +545,10 @@
                 opts.driver.destroy();
             },
             onDestroyed: function () {
+                if (state.lastTourHadGlobalSteps) {
+                    markGlobalStepsSeen();
+                    state.lastTourHadGlobalSteps = false;
+                }
                 markSeen(source || 'tour-destroyed');
                 state.activeDriver = null;
             }

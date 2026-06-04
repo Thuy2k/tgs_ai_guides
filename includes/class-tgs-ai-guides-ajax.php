@@ -80,6 +80,10 @@ final class TGS_AI_Guides_Ajax
         $view = isset($_POST['view']) ? sanitize_key(wp_unslash($_POST['view'])) : 'dashboard';
         $page = isset($_POST['page']) ? sanitize_key(wp_unslash($_POST['page'])) : 'tgs-shop-management';
         $question = isset($_POST['question']) ? sanitize_text_field(wp_unslash($_POST['question'])) : '';
+        $scope = isset($_POST['scope']) ? sanitize_key(wp_unslash($_POST['scope'])) : 'page';
+        if (!in_array($scope, array('page', 'project'), true)) {
+            $scope = 'page';
+        }
 
         if ($question === '') {
             wp_send_json_error(array('message' => 'Câu hỏi đang trống.'), 400);
@@ -87,12 +91,12 @@ final class TGS_AI_Guides_Ajax
 
         $tour = TGS_AI_Guides_Registry::get_tour($view, $page);
 
-        $external_answer = apply_filters('tgs_ai_guides_ai_answer', null, $question, $view, $tour, $page);
+        $external_answer = apply_filters('tgs_ai_guides_ai_answer', null, $question, $view, $tour, $page, $scope);
         if (is_array($external_answer)) {
             wp_send_json_success($external_answer);
         }
 
-        wp_send_json_success(TGS_AI_Guides_Registry::answer_question($view, $question, $page));
+        wp_send_json_success(TGS_AI_Guides_Registry::answer_question($view, $question, $page, $scope));
     }
 
     public static function seen_key($view, $version, $page = 'tgs-shop-management')
