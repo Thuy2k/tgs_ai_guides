@@ -103,6 +103,17 @@ final class TGS_AI_Guides
                 'send' => 'Gửi',
                 'typing' => 'Đang kiểm tra hướng dẫn...',
                 'tourUnavailable' => 'Trang này chưa có đủ thành phần để chạy tour. Bạn vẫn có thể hỏi nhanh ở khung hỗ trợ.',
+                'emptyAnswer' => 'Mình chưa trả lời được câu này trong bộ hướng dẫn hiện tại.',
+                'requestFailed' => 'Không gọi được khung hỗ trợ lúc này. Vui lòng thử lại sau.',
+                'sessionExpired' => 'Phiên đăng nhập có thể đã hết hạn. Vui lòng tải lại trang hoặc đăng nhập lại.',
+                'driverMissing' => 'Không tìm thấy driver.js trên trang. Kiểm tra lại asset của plugin TGS AI Guides.',
+                'skipConfirmed' => 'Đã ghi nhận bỏ qua hướng dẫn cho trang này. Bạn vẫn có thể bấm "Hướng dẫn lại" bất cứ lúc nào.',
+                'resetConfirmed' => 'Đã reset lịch sử hướng dẫn đã xem cho tài khoản hiện tại trên website này.',
+                'skipTour' => 'Bỏ qua',
+                'closeTour' => 'Bỏ qua hướng dẫn',
+                'nextStep' => 'Tiếp',
+                'prevStep' => 'Quay lại',
+                'doneStep' => 'Hoàn tất',
             ),
         );
 

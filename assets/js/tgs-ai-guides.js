@@ -25,6 +25,15 @@
         return value == null ? '' : String(value);
     }
 
+    function label(key, fallback) {
+        var labels = config.labels || {};
+        return text(labels[key] || fallback || '');
+    }
+
+    function requestErrorMessage(error) {
+        return error && error.message ? error.message : label('requestFailed', 'Không gọi được khung hỗ trợ lúc này. Vui lòng thử lại sau.');
+    }
+
     function getDriverFactory() {
         if (window.driver && window.driver.js && typeof window.driver.js.driver === 'function') {
             return window.driver.js.driver;
@@ -52,7 +61,29 @@
             },
             body: body.toString()
         }).then(function (response) {
-            return response.json();
+            return response.text().then(function (payload) {
+                var json = null;
+                if (payload) {
+                    try {
+                        json = JSON.parse(payload);
+                    } catch (error) {
+                        json = null;
+                    }
+                }
+
+                if (!response.ok || !json) {
+                    var message = json && json.data && json.data.message ? json.data.message : '';
+                    if (!message && !json && response.redirected) {
+                        message = label('sessionExpired', 'Phiên đăng nhập có thể đã hết hạn. Vui lòng tải lại trang hoặc đăng nhập lại.');
+                    }
+                    if (!message && !response.ok) {
+                        message = response.statusText;
+                    }
+                    throw new Error(message || label('requestFailed', 'Không gọi được khung hỗ trợ lúc này. Vui lòng thử lại sau.'));
+                }
+
+                return json;
+            });
         });
     }
 
@@ -159,7 +190,7 @@
                 state.activeDriver.destroy();
             }
             markSeen('skip-button').then(function () {
-                appendMessage('assistant', 'Đã ghi nhận bỏ qua hướng dẫn cho trang này. Bạn vẫn có thể bấm "Hướng dẫn lại" bất cứ lúc nào.');
+                appendMessage('assistant', label('skipConfirmed', 'Đã ghi nhận bỏ qua hướng dẫn cho trang này. Bạn vẫn có thể bấm "Hướng dẫn lại" bất cứ lúc nào.'));
             });
         });
 
@@ -201,7 +232,10 @@
                     view: config.view,
                     version: config.tour.version
                 }).then(function () {
-                    appendMessage('assistant', 'Đã reset lịch sử hướng dẫn đã xem cho tài khoản hiện tại trên website này.');
+                    appendMessage('assistant', label('resetConfirmed', 'Đã reset lịch sử hướng dẫn đã xem cho tài khoản hiện tại trên website này.'));
+                    togglePanel(true);
+                }).catch(function (error) {
+                    appendMessage('assistant', requestErrorMessage(error));
                     togglePanel(true);
                 });
             });
@@ -293,16 +327,16 @@
         }).then(function (response) {
             showTyping(false);
             if (!response || !response.success || !response.data) {
-                appendMessage('assistant', 'Mình chưa trả lời được câu này trong bộ hướng dẫn hiện tại.');
+                appendMessage('assistant', response && response.data && response.data.message ? text(response.data.message) : label('emptyAnswer', 'Mình chưa trả lời được câu này trong bộ hướng dẫn hiện tại.'));
                 return;
             }
             appendMessage('assistant', text(response.data.answer));
             if (response.data.quickQuestions) {
                 renderQuickQuestions(response.data.quickQuestions);
             }
-        }).catch(function () {
+        }).catch(function (error) {
             showTyping(false);
-            appendMessage('assistant', 'Không gọi được khung hỗ trợ lúc này. Vui lòng thử lại sau.');
+            appendMessage('assistant', requestErrorMessage(error));
         });
     }
 
@@ -387,7 +421,7 @@
     function startTour(source) {
         var driverFactory = getDriverFactory();
         if (!driverFactory) {
-            appendMessage('assistant', 'Không tìm thấy driver.js trên trang. Kiểm tra lại asset của plugin TGS AI Guides.');
+            appendMessage('assistant', label('driverMissing', 'Không tìm thấy driver.js trên trang. Kiểm tra lại asset của plugin TGS AI Guides.'));
             togglePanel(true);
             return;
         }
@@ -410,18 +444,18 @@
             popoverClass: 'tgs-ai-driver-popover',
             showProgress: true,
             progressText: '{{current}}/{{total}}',
-            nextBtnText: 'Tiếp',
-            prevBtnText: 'Quay lại',
-            doneBtnText: 'Hoàn tất',
+            nextBtnText: label('nextStep', 'Tiếp'),
+            prevBtnText: label('prevStep', 'Quay lại'),
+            doneBtnText: label('doneStep', 'Hoàn tất'),
             onPopoverRender: function (popover, opts) {
                 if (popover.closeButton) {
-                    popover.closeButton.setAttribute('aria-label', 'Bỏ qua hướng dẫn');
+                    popover.closeButton.setAttribute('aria-label', label('closeTour', 'Bỏ qua hướng dẫn'));
                 }
                 if (popover.footerButtons && !popover.footerButtons.querySelector('.tgs-driver-skip')) {
                     var skip = document.createElement('button');
                     skip.type = 'button';
                     skip.className = 'tgs-driver-skip';
-                    skip.textContent = 'Bỏ qua';
+                    skip.textContent = label('skipTour', 'Bỏ qua');
                     skip.addEventListener('click', function () {
                         markSeen('skip-in-tour');
                         opts.driver.destroy();

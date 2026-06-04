@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 
 final class TGS_AI_Guides_Registry
 {
-    const VERSION = '2026-06-04-02';
+    const VERSION = '2026-06-04-03';
 
     public static function get_tour($view, $page = 'tgs-shop-management')
     {
@@ -189,6 +189,7 @@ final class TGS_AI_Guides_Registry
             'customers-excel-import' => 'customer_import',
             'contact-detail' => 'contact_detail',
             'suppliers' => 'supplier_list',
+            'shops' => 'shop_list',
             'suppliers-global' => 'supplier_list',
             'supplier-global-detail' => 'supplier_detail',
             'supplier-migration' => 'supplier_migration',
@@ -637,6 +638,23 @@ final class TGS_AI_Guides_Registry
                     self::knowledge(array('kiem tra', 'sau import'), 'Sau import, quay lại danh sách nhà cung cấp để tìm theo mã/tên và kiểm tra trạng thái.'),
                 )),
                 array('sourceSections' => array('2.2 Nhà cung cấp', '14. Xuất nhập Excel'))
+            ),
+
+            'shop_list' => self::guide(
+                'Quản lý shop con',
+                'Trang shop con dùng để kiểm tra các website chi nhánh trong mô hình multisite và các thông tin vận hành gắn với từng site.',
+                array('Shop con dùng để làm gì?', 'Cài đặt lưu theo shop nào?', 'Khi nào cần kiểm tra chi nhánh?'),
+                array_merge($generic_steps, array(
+                    self::step('h4, .card-title, .wrap h1', 'Danh sách shop con', 'Kiểm tra đúng màn hình quản lý chi nhánh trước khi xem hoặc chỉnh thông tin site.', 'bottom', 'start'),
+                    self::step('table, .card-datatable, .wp-list-table', 'Bảng website/chi nhánh', 'Đọc danh sách shop, trạng thái và thông tin nhận diện để đối chiếu dữ liệu vận hành.', 'top', 'center'),
+                    self::step('form, input, select, .button-primary, .btn-primary', 'Thông tin và thao tác', 'Nếu trang có form hoặc nút thao tác, chỉ cập nhật khi đã xác nhận đúng chi nhánh/site hiện tại.', 'left', 'center'),
+                )),
+                array_merge($generic_knowledge, array(
+                    self::knowledge(array('shop con', 'chi nhanh', 'website chi nhanh', 'site'), 'Shop con đại diện cho từng website/chi nhánh trong multisite. Kiểm tra đúng site trước khi cấu hình thương hiệu, in phiếu hoặc dữ liệu vận hành.'),
+                    self::knowledge(array('cai dat luu theo shop nao', 'multisite', 'luu theo site'), 'Các cài đặt như thương hiệu, in tem hoặc một số feature thường lưu theo website chi nhánh hiện tại, không dùng chung cho toàn mạng.'),
+                    self::knowledge(array('kiem tra chi nhanh', 'doi chieu'), 'Khi số liệu hoặc giao diện không khớp, hãy kiểm tra đang đứng đúng chi nhánh/site trước khi xử lý dữ liệu sản phẩm, phiếu hoặc báo cáo.'),
+                )),
+                array('sourceSections' => array('13. Cài đặt thương hiệu và in phiếu', '16. Bảng tóm tắt chức năng'))
             ),
 
             'supplier_migration' => self::guide(
