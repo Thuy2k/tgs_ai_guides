@@ -12,7 +12,10 @@
         markedSeen: false,
         typingNode: null,
         chatScope: 'page',
-        lastTourHadGlobalSteps: false
+        lastTourHadGlobalSteps: false,
+        guidesEnabled: true,
+        quickExpanded: false,
+        lastQuickQuestions: []
     };
 
     function ready(callback) {
@@ -43,6 +46,35 @@
             config.userId || 0,
             config.tour.version || 'v1'
         ].join('_');
+    }
+
+    function guidesDisabledStorageKey() {
+        return [
+            'tgs_ai_guides_disabled',
+            config.siteId || 0,
+            config.userId || 0
+        ].join('_');
+    }
+
+    function areGuidesDisabled() {
+        try {
+            return window.localStorage.getItem(guidesDisabledStorageKey()) === '1';
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function setGuidesDisabled(disabled) {
+        try {
+            if (disabled) {
+                window.localStorage.setItem(guidesDisabledStorageKey(), '1');
+            } else {
+                window.localStorage.removeItem(guidesDisabledStorageKey());
+            }
+        } catch (error) {}
+
+        state.guidesEnabled = !disabled;
+        syncGuidesEnabledUi();
     }
 
     function getGlobalStepCooldownMs() {
@@ -145,6 +177,10 @@
         }).catch(function () {});
     }
 
+    function projectQuickQuestions() {
+        return (config.tour && config.tour.projectQuickQuestions) || config.projectQuickQuestions || [];
+    }
+
     function createButton(className, label, iconClass) {
         var button = document.createElement('button');
         button.type = 'button';
@@ -183,7 +219,10 @@
                     '<div class="tgs-ai-guide-panel__title"></div>',
                     '<div class="tgs-ai-guide-panel__subtitle"></div>',
                 '</div>',
-                '<button type="button" class="tgs-ai-guide-panel__close" aria-label="Đóng"><i class="bx bx-x"></i></button>',
+                '<div class="tgs-ai-guide-panel__tools">',
+                    '<button type="button" class="tgs-ai-guide-panel__toggle" data-tgs-ai-toggle-all aria-label=""></button>',
+                    '<button type="button" class="tgs-ai-guide-panel__close" aria-label="Đóng"><i class="bx bx-x"></i></button>',
+                '</div>',
             '</div>',
             '<div class="tgs-ai-guide-panel__body">',
                 '<div class="tgs-ai-guide-actions">',
@@ -218,10 +257,55 @@
         bindShellEvents(launcher, panel);
         appendMessage('assistant', config.tour.summary);
         renderQuickQuestions(config.tour.quickQuestions || []);
+        syncGuidesEnabledUi();
+    }
+
+    function syncGuidesEnabledUi() {
+        var launcher = document.getElementById('tgsAiGuideLauncher');
+        var panel = document.getElementById('tgsAiGuidePanel');
+        var enabled = state.guidesEnabled;
+
+        document.body.classList.toggle('tgs-ai-guides-disabled', !enabled);
+
+        if (launcher) {
+            launcher.classList.toggle('is-disabled', !enabled);
+            launcher.setAttribute('aria-label', enabled ? label('launcher', 'AI hỗ trợ') : label('enableAll', 'Bật gợi ý toàn bộ'));
+            launcher.setAttribute('title', enabled ? label('launcher', 'AI hỗ trợ') : label('enableAll', 'Bật gợi ý toàn bộ'));
+
+            var launcherIcon = launcher.querySelector('i');
+            var launcherText = launcher.querySelector('span');
+            if (launcherIcon) {
+                launcherIcon.className = enabled ? 'bx bx-bot' : 'bx bx-show';
+            }
+            if (launcherText) {
+                launcherText.textContent = enabled ? label('launcher', 'AI hỗ trợ') : label('enableAll', 'Bật gợi ý');
+            }
+        }
+
+        if (!panel) {
+            return;
+        }
+
+        panel.classList.toggle('is-guides-disabled', !enabled);
+        panel.querySelectorAll('[data-tgs-ai-replay], [data-tgs-ai-skip]').forEach(function (button) {
+            button.disabled = !enabled;
+        });
+
+        var toggle = panel.querySelector('[data-tgs-ai-toggle-all]');
+        if (toggle) {
+            toggle.innerHTML = '<i class="bx ' + (enabled ? 'bx-hide' : 'bx-show') + '"></i>';
+            toggle.setAttribute('aria-label', enabled ? label('disableAll', 'Tắt gợi ý toàn bộ') : label('enableAll', 'Bật gợi ý toàn bộ'));
+            toggle.setAttribute('title', enabled ? label('disableAll', 'Tắt gợi ý toàn bộ') : label('enableAll', 'Bật gợi ý toàn bộ'));
+            toggle.classList.toggle('is-disabled', !enabled);
+        }
     }
 
     function bindShellEvents(launcher, panel) {
         launcher.addEventListener('click', function () {
+            if (!state.guidesEnabled) {
+                setGuidesDisabled(false);
+                appendMessage('assistant', label('enabledNotice', 'Đã bật lại AI hỗ trợ hướng dẫn cho toàn bộ trang.'));
+            }
             togglePanel(true);
         });
 
@@ -232,6 +316,21 @@
         panel.querySelector('[data-tgs-ai-replay]').addEventListener('click', function () {
             togglePanel(false);
             startTour('manual');
+        });
+
+        panel.querySelector('[data-tgs-ai-toggle-all]').addEventListener('click', function () {
+            var shouldDisable = state.guidesEnabled;
+            if (shouldDisable && state.activeDriver) {
+                state.activeDriver.destroy();
+            }
+            setGuidesDisabled(shouldDisable);
+            if (shouldDisable) {
+                appendMessage('assistant', label('disabledNotice', 'Đã tắt gợi ý tự động trên toàn bộ trang cho tài khoản này. Bấm nút nhỏ "Bật gợi ý" khi cần dùng lại.'));
+                togglePanel(false);
+            } else {
+                appendMessage('assistant', label('enabledNotice', 'Đã bật lại AI hỗ trợ hướng dẫn cho toàn bộ trang.'));
+                togglePanel(true);
+            }
         });
 
         panel.querySelector('[data-tgs-ai-skip]').addEventListener('click', function () {
@@ -257,15 +356,11 @@
         panel.querySelectorAll('[data-tgs-ai-scope]').forEach(function (button) {
             button.addEventListener('click', function () {
                 state.chatScope = button.getAttribute('data-tgs-ai-scope') === 'project' ? 'project' : 'page';
+                state.quickExpanded = false;
                 panel.querySelectorAll('[data-tgs-ai-scope]').forEach(function (item) {
                     item.classList.toggle('is-active', item === button);
                 });
-                renderQuickQuestions(state.chatScope === 'project' ? [
-                    'Quét tồn thông minh dùng thế nào?',
-                    'PO theo gợi ý và PO chủ động khác gì?',
-                    'Cấu hình min/max tồn kho ở đâu?',
-                    'Luân chuyển nội bộ gồm những bước nào?'
-                ] : (config.tour.quickQuestions || []));
+                renderQuickQuestions(state.chatScope === 'project' ? projectQuickQuestions() : (config.tour.quickQuestions || []));
             });
         });
 
@@ -366,8 +461,12 @@
             return;
         }
 
+        state.lastQuickQuestions = Array.isArray(questions) ? questions.slice() : [];
         holder.innerHTML = '';
-        questions.slice(0, 5).forEach(function (question) {
+        var limit = state.chatScope === 'project' ? 8 : 5;
+        var visibleQuestions = state.quickExpanded ? state.lastQuickQuestions : state.lastQuickQuestions.slice(0, limit);
+
+        visibleQuestions.forEach(function (question) {
             var chip = document.createElement('button');
             chip.type = 'button';
             chip.className = 'tgs-ai-guide-chip';
@@ -377,6 +476,20 @@
             });
             holder.appendChild(chip);
         });
+
+        if (state.lastQuickQuestions.length > limit) {
+            var more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'tgs-ai-guide-chip tgs-ai-guide-chip--more';
+            more.textContent = state.quickExpanded
+                ? label('showFewerQuestions', 'Thu gọn')
+                : label('showMoreQuestions', 'Xem thêm') + ' +' + (state.lastQuickQuestions.length - limit);
+            more.addEventListener('click', function () {
+                state.quickExpanded = !state.quickExpanded;
+                renderQuickQuestions(state.lastQuickQuestions);
+            });
+            holder.appendChild(more);
+        }
     }
 
     function ask(question) {
@@ -496,6 +609,12 @@
     }
 
     function startTour(source) {
+        if (!state.guidesEnabled) {
+            appendMessage('assistant', label('disabledNotice', 'Đã tắt gợi ý tự động trên toàn bộ trang cho tài khoản này. Bấm nút nhỏ "Bật gợi ý" khi cần dùng lại.'));
+            togglePanel(true);
+            return;
+        }
+
         var driverFactory = getDriverFactory();
         if (!driverFactory) {
             appendMessage('assistant', label('driverMissing', 'Không tìm thấy driver.js trên trang. Kiểm tra lại asset của plugin TGS AI Guides.'));
@@ -558,6 +677,7 @@
     }
 
     ready(function () {
+        state.guidesEnabled = !areGuidesDisabled();
         createShell();
 
         window.TGSAIGuides = {
@@ -567,7 +687,7 @@
             ask: ask
         };
 
-        if (config.autoStart) {
+        if (state.guidesEnabled && config.autoStart) {
             setTimeout(function () {
                 startTour('auto-first-load');
             }, 900);

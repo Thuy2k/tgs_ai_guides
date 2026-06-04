@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 
 final class TGS_AI_Guides_Registry
 {
-    const VERSION = '2026-06-04-05';
+    const VERSION = '2026-06-04-06';
 
     public static function get_tour($view, $page = 'tgs-shop-management')
     {
@@ -47,6 +47,7 @@ final class TGS_AI_Guides_Registry
             'title' => $guide['title'],
             'summary' => $guide['summary'],
             'quickQuestions' => $quick_questions,
+            'projectQuickQuestions' => self::project_quick_questions(),
             'globalSteps' => $global_steps,
             'pageSteps' => $page_steps,
             'steps' => array_values(array_merge($page_steps, $global_steps)),
@@ -70,13 +71,7 @@ final class TGS_AI_Guides_Registry
         $best_score = 0;
 
         foreach ($tour['knowledge'] as $entry) {
-            $score = 0;
-            foreach ($entry['terms'] as $term) {
-                $needle = self::normalize($term);
-                if ($needle !== '' && strpos($normalized_question, $needle) !== false) {
-                    $score += strlen($needle) > 8 ? 3 : 1;
-                }
-            }
+            $score = self::score_knowledge_entry($normalized_question, $entry);
 
             if ($score > $best_score) {
                 $best_score = $score;
@@ -111,13 +106,10 @@ final class TGS_AI_Guides_Registry
         foreach ($definitions as $guide_key => $guide) {
             $entries = isset($guide['knowledge']) ? $guide['knowledge'] : array();
             foreach ($entries as $entry) {
-                $score = 0;
-                foreach ($entry['terms'] as $term) {
-                    $needle = self::normalize($term);
-                    if ($needle !== '' && strpos($normalized_question, $needle) !== false) {
-                        $score += strlen($needle) > 8 ? 3 : 1;
-                    }
-                }
+                $score = self::score_knowledge_entry($normalized_question, $entry);
+                $score += self::score_group_match($normalized_question, $guide_key);
+                $score += self::score_text_match($normalized_question, isset($guide['title']) ? $guide['title'] : '') * 0.5;
+                $score += self::score_text_match($normalized_question, isset($guide['summary']) ? $guide['summary'] : '') * 0.25;
 
                 if ($score > $best_score) {
                     $best_score = $score;
@@ -158,9 +150,22 @@ final class TGS_AI_Guides_Registry
             'Quét tồn thông minh dùng thế nào?',
             'PO theo gợi ý và PO chủ động khác gì?',
             'Cấu hình min/max tồn kho ở đâu?',
+            'Tốc độ bán ảnh hưởng cảnh báo mua hàng ra sao?',
+            'Hàng đi đường được trừ trong đề xuất mua thế nào?',
             'Lô mua, hợp đồng và chính sách mua liên quan thế nào?',
             'Luân chuyển nội bộ gồm những bước nào?',
             'Báo cáo điều hành rollup đọc như thế nào?',
+            'Vì sao báo cáo rollup không có số liệu?',
+            'Tồn kho theo SKU đọc min/max và số ngày tồn ra sao?',
+            'Dự báo hết hàng dùng để quyết định mua thế nào?',
+            'Doanh thu theo shop so sánh AOV và tăng trưởng thế nào?',
+            'Thống kê khách hàng phân biệt khách mới/cũ ra sao?',
+            'Import Excel sản phẩm cần kiểm tra gì?',
+            'Theo dõi HSD/mã định danh ảnh hưởng luồng nào?',
+            'Tạo phiếu nhập/xuất/bán hàng bắt đầu ở đâu?',
+            'Công nợ nhà cung cấp xem ở đâu?',
+            'Phân quyền menu và vai trò chỉnh ở đâu?',
+            'Cấu hình in tem, thương hiệu và hóa đơn ở đâu?',
         );
     }
 
@@ -906,7 +911,7 @@ final class TGS_AI_Guides_Registry
                     self::step('.js-speed-detail, .scp-hint-btn, a[href*="purchase-sell-speed-config"]', 'Gợi ý theo tốc độ bán', 'Dùng dữ liệu tốc độ bán để tham khảo trước khi đặt min/max cho từng mã hàng.', 'left', 'center'),
                 ),
                 array(
-                    self::knowledge(array('min max', 'cau hinh ton', 'nguong ton'), 'Min/max là nền cho quét tồn thông minh. Dưới min là cảnh báo gấp, dưới max là nhu cầu bổ sung, trên max là dấu hiệu dư hàng.'),
+                    self::knowledge(array('min max o dau', 'cau hinh min max o dau', 'cau hinh min max ton kho', 'min max', 'cau hinh ton', 'nguong ton'), 'Min/max là nền cho quét tồn thông minh. Dưới min là cảnh báo gấp, dưới max là nhu cầu bổ sung, trên max là dấu hiệu dư hàng.'),
                     self::knowledge(array('shop', 'cua hang', 'chi nhanh'), 'Với shop, thường chỉ cần max để xác định thiếu/dư so với mức trưng bày hoặc nhu cầu bán; với kho, min giúp cảnh báo thiếu nguồn cung cho toàn hệ thống.'),
                     self::knowledge(array('toc do ban', 'goi y min max'), 'Tốc độ bán theo số ngày giúp gợi ý ngưỡng hợp lý hơn thay vì nhập thủ công theo cảm tính.'),
                     self::knowledge(array('luu', 'cap nhat', 'ghi chu'), 'Sau khi sửa min/max, kiểm tra dòng bị đổi và lưu. Nên ghi chú lý do nếu chỉnh ngưỡng cho SKU quan trọng.'),
@@ -1494,7 +1499,7 @@ final class TGS_AI_Guides_Registry
                     self::step('.tgra-chip--red, .tgra-chip--amber, .tgra-chip--green', 'Mức ưu tiên', 'Chip màu giúp phân biệt khẩn cấp, cần nhập và bổ sung để ưu tiên xử lý SKU quan trọng trước.', 'left', 'center'),
                 )),
                 self::rollup_report_knowledge(array(
-                    self::knowledge(array('cong thuc', 'can nhap', 'suggest_qty'), 'Với site kho có cấu hình: cần nhập = Max + tốc độ bán - đi đường - tồn. Với shop có cấu hình: cần nhập = Max - tồn. Nếu chưa cấu hình, hệ thống ước tính theo tốc độ bán nhiều ngày rồi trừ tồn và hàng đi đường.'),
+                    self::knowledge(array('hang di duong canh bao mua', 'hang di duong de xuat mua', 'cong thuc canh bao mua', 'cong thuc', 'can nhap', 'suggest_qty'), 'Với site kho có cấu hình: cần nhập = Max + tốc độ bán - đi đường - tồn. Với shop có cấu hình: cần nhập = Max - tồn. Nếu chưa cấu hình, hệ thống ước tính theo tốc độ bán nhiều ngày rồi trừ tồn và hàng đi đường.'),
                     self::knowledge(array('min max', 'co cau hinh', 'chua cau hinh'), 'Dòng có cấu hình dùng ngưỡng min/max tồn kho; dòng chưa cấu hình dùng tốc độ bán làm cơ sở tạm. Nên hoàn thiện cấu hình min/max để gợi ý mua ổn định hơn.'),
                     self::knowledge(array('kho', 'shop', 'ps_shop_id'), 'Chọn đúng tab shop/kho trước khi xuất Excel hoặc lập PO. Kho thường cần tính thêm hàng đi đường và nhu cầu cấp cho shop con.'),
                     self::knowledge(array('xuat excel', 'export'), 'Nút xuất Excel lấy đúng shop/kho đang chọn và danh sách đang có trong báo cáo. Dùng file này làm đầu vào rà soát mua hàng hoặc tạo PO.'),
@@ -2223,6 +2228,170 @@ final class TGS_AI_Guides_Registry
         return array(
             'terms' => $terms,
             'answer' => $answer,
+        );
+    }
+
+    private static function score_knowledge_entry($normalized_question, $entry)
+    {
+        $score = 0;
+        $terms = isset($entry['terms']) && is_array($entry['terms']) ? $entry['terms'] : array();
+
+        foreach ($terms as $term) {
+            $score += self::score_text_match($normalized_question, $term);
+        }
+
+        return $score;
+    }
+
+    private static function score_text_match($normalized_question, $candidate)
+    {
+        $needle = self::normalize($candidate);
+        if ($normalized_question === '' || $needle === '') {
+            return 0;
+        }
+
+        $score = 0;
+        if (strpos($normalized_question, $needle) !== false) {
+            $score += strlen($needle) > 10 ? 8 : 4;
+        }
+
+        $question_tokens = self::expanded_tokens($normalized_question);
+        $candidate_tokens = self::expanded_tokens($needle);
+        if (!$question_tokens || !$candidate_tokens) {
+            return $score;
+        }
+
+        $matched = 0;
+        foreach ($candidate_tokens as $token) {
+            if (isset($question_tokens[$token])) {
+                $matched++;
+                $score += strlen($token) > 4 ? 2 : 1;
+            }
+        }
+
+        if ($matched > 1) {
+            $score += $matched;
+        }
+
+        return $score;
+    }
+
+    private static function score_group_match($normalized_question, $guide_key)
+    {
+        $groups = array(
+            'purchase_stock_config' => array('min max', 'cau hinh ton', 'nguong ton', 'ton kho', 'duoi min', 'tren max'),
+            'purchase_po' => array('po', 'po chu dong', 'po goi y', 'quet ton', 'dat hang', 'phieu mua'),
+            'rollup_purchase_suggestion' => array('canh bao mua', 'de xuat mua', 'can nhap', 'hang di duong', 'toc do ban', 'suggest_qty'),
+            'rollup_transfer' => array('dieu chuyen', 'luan chuyen', 'noi bo', 'hang di duong', 'da den dich'),
+            'rollup_overview' => array('rollup', 'bao cao dieu hanh', 'khong co so lieu', 'kpi'),
+            'rollup_inventory' => array('ton kho sku', 'stockout', 'het hang', 'sap het han', 'so ngay ton'),
+            'rollup_customer' => array('khach hang', 'khach moi', 'khach cu', 'ngay chua mua'),
+            'permission_settings' => array('phan quyen', 'menu', 'vai tro', 'role', 'user'),
+            'label_print_settings' => array('in tem', 'barcode', 'profile tem'),
+            'brand_settings' => array('thuong hieu', 'logo', 'in phieu'),
+            'viettel_invoice' => array('hoa don', 'viettel', 'phat hanh'),
+            'viettel_invoice_settings' => array('hoa don cau hinh', 'cau hinh hoa don', 'template', 'series'),
+            'purchase_payment' => array('cong no', 'ncc', 'thanh toan', 'phai tra'),
+        );
+
+        if (!isset($groups[$guide_key])) {
+            return 0;
+        }
+
+        $score = 0;
+        foreach ($groups[$guide_key] as $keyword) {
+            $score += self::score_text_match($normalized_question, $keyword) * 1.5;
+        }
+
+        return $score;
+    }
+
+    private static function expanded_tokens($normalized_text)
+    {
+        $tokens = self::tokenize($normalized_text);
+        $aliases = self::term_aliases();
+
+        foreach (array_keys($tokens) as $token) {
+            if (isset($aliases[$token])) {
+                foreach ($aliases[$token] as $alias) {
+                    $tokens[$alias] = true;
+                }
+            }
+        }
+
+        $phrases = array(
+            'min max' => array('minmax', 'ton_min_max'),
+            'hang di duong' => array('in_transit', 'pending_transfer'),
+            'hang chien luoc' => array('hcl', 'global_sci'),
+            'nha cung cap' => array('ncc', 'supplier'),
+            'han su dung' => array('hsd', 'expiry'),
+            'dieu chuyen' => array('luan_chuyen', 'transfer'),
+            'luan chuyen' => array('dieu_chuyen', 'transfer'),
+            'noi bo' => array('internal', 'transfer'),
+            'bao cao dieu hanh' => array('rollup', 'analytics'),
+            'canh bao mua hang' => array('purchase_suggestion', 'po'),
+            'toc do ban' => array('sell_speed', 'du_bao'),
+            'du bao het hang' => array('stockout', 'forecast'),
+            'khach hang' => array('customer', 'crm'),
+        );
+
+        foreach ($phrases as $phrase => $phrase_aliases) {
+            if (strpos($normalized_text, $phrase) !== false) {
+                $tokens[str_replace(' ', '_', $phrase)] = true;
+                foreach ($phrase_aliases as $alias) {
+                    $tokens[$alias] = true;
+                }
+            }
+        }
+
+        return $tokens;
+    }
+
+    private static function tokenize($normalized_text)
+    {
+        $tokens = preg_split('/[\s_-]+/', $normalized_text);
+        $result = array();
+        $keep_short = array('po', 'sku', 'ncc', 'hcl', 'hsd', 'aov', 'api', 'pos', 'ai');
+
+        foreach ($tokens as $token) {
+            $token = trim($token);
+            if ($token === '') {
+                continue;
+            }
+            if (strlen($token) < 3 && !in_array($token, $keep_short, true)) {
+                continue;
+            }
+            $result[$token] = true;
+        }
+
+        return $result;
+    }
+
+    private static function term_aliases()
+    {
+        return array(
+            'po' => array('purchase', 'mua', 'dat_hang', 'phieu_mua'),
+            'purchase' => array('po', 'mua', 'dat_hang'),
+            'ton' => array('kho', 'inventory', 'stock'),
+            'kho' => array('ton', 'inventory', 'stock'),
+            'inventory' => array('ton', 'kho', 'stock'),
+            'stock' => array('ton', 'kho', 'inventory'),
+            'minmax' => array('min', 'max', 'ton_min_max'),
+            'ncc' => array('supplier', 'nha_cung_cap'),
+            'supplier' => array('ncc', 'nha_cung_cap'),
+            'hsd' => array('han_su_dung', 'expiry'),
+            'expiry' => array('hsd', 'han_su_dung'),
+            'hcl' => array('hang_chien_luoc', 'global_sci'),
+            'global' => array('toan_du_an', 'project'),
+            'project' => array('toan_du_an', 'global'),
+            'rollup' => array('analytics', 'bao_cao', 'dieu_hanh'),
+            'analytics' => array('rollup', 'bao_cao', 'dieu_hanh'),
+            'transfer' => array('dieu_chuyen', 'luan_chuyen', 'noi_bo'),
+            'customer' => array('khach_hang', 'crm'),
+            'aov' => array('gia_tri_don', 'don_trung_binh'),
+            'pos' => array('ban_hang', 'tai_quay'),
+            'api' => array('tich_hop', 'ket_noi'),
+            'zalo' => array('oa', 'thong_bao'),
         );
     }
 

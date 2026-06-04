@@ -32,6 +32,36 @@
     outline-offset: 2px;
 }
 
+.tgs-ai-guide-launcher.is-disabled {
+    min-width: 44px;
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+    background: #f8fafc;
+    color: #475467;
+    border: 1px solid #d0d5dd;
+}
+
+.tgs-ai-guide-launcher.is-disabled span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+.tgs-ai-guide-launcher.is-disabled i {
+    color: #475467;
+}
+
+.tgs-ai-guide-launcher.is-disabled:hover,
+.tgs-ai-guide-launcher.is-disabled:focus {
+    background: #eef6ff;
+    color: #075985;
+    border-color: #7dd3fc;
+}
+
 .tgs-ai-guide-panel {
     position: fixed;
     right: 22px;
@@ -76,6 +106,14 @@
     line-height: 1.35;
 }
 
+.tgs-ai-guide-panel__tools {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.tgs-ai-guide-panel__toggle,
 .tgs-ai-guide-panel__close {
     width: 32px;
     height: 32px;
@@ -89,6 +127,22 @@
     cursor: pointer;
 }
 
+.tgs-ai-guide-panel__toggle:hover,
+.tgs-ai-guide-panel__toggle:focus,
+.tgs-ai-guide-panel__close:hover,
+.tgs-ai-guide-panel__close:focus {
+    border-color: #7dd3fc;
+    color: #075985;
+    background: #f0f9ff;
+}
+
+.tgs-ai-guide-panel__toggle.is-disabled {
+    border-color: #99f6e4;
+    color: #0f766e;
+    background: #f0fdfa;
+}
+
+.tgs-ai-guide-panel__toggle i,
 .tgs-ai-guide-panel__close i {
     font-size: 20px;
 }
@@ -125,6 +179,19 @@
     border-color: #7dd3fc;
     background: #f0f9ff;
     color: #075985;
+}
+
+.tgs-ai-guide-action:disabled {
+    opacity: .48;
+    cursor: not-allowed;
+    background: #f8fafc;
+}
+
+.tgs-ai-guide-panel.is-guides-disabled .tgs-ai-guide-scope,
+.tgs-ai-guide-panel.is-guides-disabled .tgs-ai-guide-messages,
+.tgs-ai-guide-panel.is-guides-disabled .tgs-ai-guide-quick,
+.tgs-ai-guide-panel.is-guides-disabled .tgs-ai-guide-form {
+    opacity: .94;
 }
 
 .tgs-ai-guide-scope {
@@ -212,6 +279,12 @@
     border-color: #0f766e;
     color: #0f766e;
     background: #f0fdfa;
+}
+
+.tgs-ai-guide-chip--more {
+    border-style: dashed;
+    color: #0f766e;
+    font-weight: 700;
 }
 
 .tgs-ai-guide-form {
