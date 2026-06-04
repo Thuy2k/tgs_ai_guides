@@ -6,7 +6,7 @@ if (!defined('ABSPATH')) {
 
 final class TGS_AI_Guides_Registry
 {
-    const VERSION = '2026-06-04-04';
+    const VERSION = '2026-06-04-05';
 
     public static function get_tour($view, $page = 'tgs-shop-management')
     {
@@ -160,6 +160,7 @@ final class TGS_AI_Guides_Registry
             'Cấu hình min/max tồn kho ở đâu?',
             'Lô mua, hợp đồng và chính sách mua liên quan thế nào?',
             'Luân chuyển nội bộ gồm những bước nào?',
+            'Báo cáo điều hành rollup đọc như thế nào?',
         );
     }
 
@@ -178,7 +179,7 @@ final class TGS_AI_Guides_Registry
                 'Quét tồn thông minh và PO',
                 'Mua hàng, min/max, lô mua, hợp đồng, chính sách',
                 'Luân chuyển hàng nội bộ',
-                'Báo cáo và cấu hình hệ thống',
+                'Báo cáo, rollup analytics và cấu hình hệ thống',
             ),
         );
     }
@@ -213,6 +214,32 @@ final class TGS_AI_Guides_Registry
         $map = self::view_map();
         if (isset($map[$view])) {
             return apply_filters('tgs_ai_guides_group_for_view', $map[$view], $view, $page);
+        }
+
+        if (strpos($view, 'analytics-report-') === 0) {
+            if (strpos($view, 'stockout') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_stockout_forecast', $view, $page);
+            }
+            if (strpos($view, 'inventory') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_inventory', $view, $page);
+            }
+            if (strpos($view, 'purchase') !== false || strpos($view, 'po') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_purchase_suggestion', $view, $page);
+            }
+            if (strpos($view, 'transfer') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_transfer', $view, $page);
+            }
+            if (strpos($view, 'customer') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_customer', $view, $page);
+            }
+            if (strpos($view, 'sell-speed') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_sell_speed', $view, $page);
+            }
+            if (strpos($view, 'product') !== false) {
+                return apply_filters('tgs_ai_guides_group_for_view', 'rollup_product_sales', $view, $page);
+            }
+
+            return apply_filters('tgs_ai_guides_group_for_view', 'rollup_overview', $view, $page);
         }
 
         if (strpos($view, 'ticket-') === 0) {
@@ -349,18 +376,19 @@ final class TGS_AI_Guides_Registry
             'import' => 'legacy_import',
             'ledger' => 'ledger_view',
 
-            'reports' => 'reports_overview',
+            'reports' => 'rollup_overview',
             'report-dashboard' => 'report_dashboard',
             'storekeeper-stock-report' => 'storekeeper_report',
-            'analytics-report-overview' => 'report_dashboard',
-            'analytics-report-sales' => 'report_detail',
-            'analytics-report-product-sales' => 'report_detail',
-            'analytics-report-inventory' => 'inventory_report',
-            'analytics-report-transfer' => 'transfer_report',
-            'analytics-report-purchase-suggestion' => 'purchase_po',
-            'analytics-report-customer' => 'report_detail',
-            'analytics-report-sell-speed' => 'purchase_sell_speed_config',
-            'analytics-report-stockout-forecast' => 'purchase_po',
+            'rollup-sync' => 'rollup_sync',
+            'analytics-report-overview' => 'rollup_overview',
+            'analytics-report-sales' => 'rollup_sales',
+            'analytics-report-product-sales' => 'rollup_product_sales',
+            'analytics-report-inventory' => 'rollup_inventory',
+            'analytics-report-transfer' => 'rollup_transfer',
+            'analytics-report-purchase-suggestion' => 'rollup_purchase_suggestion',
+            'analytics-report-customer' => 'rollup_customer',
+            'analytics-report-sell-speed' => 'rollup_sell_speed',
+            'analytics-report-stockout-forecast' => 'rollup_stockout_forecast',
 
             'admin-settings' => 'settings',
             'label-print-settings' => 'label_print_settings',
@@ -1355,6 +1383,206 @@ final class TGS_AI_Guides_Registry
                 array('sourceSections' => array('4. Kho hàng', '15. Nhóm báo cáo'))
             ),
 
+            'rollup_overview' => self::guide(
+                'Báo cáo điều hành tổng quan',
+                'Màn tổng quan của tgs_rollup_analytics gom KPI doanh thu, đơn hàng, lợi nhuận, tồn kho, SKU hết hàng và điều chuyển nội bộ theo kỳ đã lọc.',
+                array('Đọc KPI tổng quan thế nào?', 'Vì sao báo cáo không có số liệu?', 'Xem hiệu quả từng shop ở đâu?'),
+                self::rollup_report_steps(array(
+                    self::step('.tgra-kpi-grid', 'KPI điều hành', 'Đọc nhanh doanh thu, số đơn, giá trị đơn trung bình, giá trị tồn kho, SKU hết hàng và giá trị điều chuyển trong kỳ.', 'bottom', 'center'),
+                    self::step('#tgra-chart-trend, .tgra-chart-wrap--combo', 'Xu hướng doanh thu và đơn hàng', 'Biểu đồ giúp xem doanh thu, lợi nhuận và số đơn thay đổi theo từng ngày trong khoảng thời gian đã chọn.', 'top', 'center'),
+                    self::step('#tgra-shops-toggle, #tgra-chart-shops, .tgra-panel--top-shops', 'Hiệu quả từng shop', 'Chuyển giữa biểu đồ và bảng để so sánh doanh thu, lợi nhuận, biên lợi nhuận và số đơn của từng shop.', 'top', 'center'),
+                    self::step('.tgra-kpi-tooltip-trigger', 'Tooltip cảnh báo', 'Các KPI có tooltip cho biết chi tiết tăng/giảm nửa kỳ hoặc danh sách SKU hết hàng cần xử lý.', 'left', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('kpi', 'tong quan', 'doanh thu', 'loi nhuan', 'don hang'), 'KPI tổng quan nên đọc theo thứ tự: doanh thu và đơn hàng để biết sức bán, lợi nhuận/biên để biết hiệu quả, tồn kho và SKU hết hàng để biết rủi ro vận hành.'),
+                    self::knowledge(array('sku het hang', 'stockout'), 'SKU hết hàng trong KPI lấy từ snapshot tồn kho tại ngày đến. Bấm hoặc rê vào cảnh báo nếu giao diện đang hỗ trợ tooltip để xem SKU và shop liên quan.'),
+                    self::knowledge(array('hieu qua shop', 'top shop', 'bien loi nhuan'), 'Khối hiệu quả từng shop giúp so sánh shop nào tạo doanh thu/lợi nhuận tốt, shop nào nhiều đơn nhưng biên thấp để quản lý xem sâu hơn ở tab Doanh thu theo shop.'),
+                    self::knowledge(array('khong co so lieu', 'bao cao trong'), 'Nếu tổng quan trống, hãy kiểm tra khoảng ngày, chi nhánh đã chọn và trạng thái rollup sales/inventory/transfer trong màn Đồng bộ dữ liệu.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-overview.php', '15. Nhóm báo cáo', '5. Quét tồn thông minh và PO'))
+            ),
+
+            'rollup_sales' => self::guide(
+                'Doanh thu theo shop',
+                'Tab doanh thu theo shop so sánh doanh thu, số đơn, AOV, tỷ trọng, tăng trưởng và xu hướng của từng chi nhánh trong kỳ.',
+                array('So sánh shop nào bán tốt?', 'Chọn nhiều shop trên biểu đồ thế nào?', 'AOV và tăng trưởng đọc ra sao?'),
+                self::rollup_report_steps(array(
+                    self::step('.tgra-shop-summary.tgra-sales-summary, .tgra-sales-summary', 'Tóm tắt doanh thu', 'Xem tổng doanh thu, tổng đơn hàng, số SKU bán được và sản phẩm bán chạy nhất trong phạm vi lọc.', 'bottom', 'center'),
+                    self::step('#tgra-compare-search, #tgra-compare-list, .tgra-compare-sidebar', 'Chọn shop để so sánh', 'Tìm shop, tick hoặc bỏ tick từng shop. Mặc định biểu đồ ưu tiên top 3 để dễ đọc.', 'right', 'center'),
+                    self::step('#tgra-compare-select-all, #tgra-compare-deselect', 'Chọn nhanh shop', 'Dùng chọn tất cả hoặc bỏ chọn khi cần đổi nhanh tập shop đang hiển thị trên biểu đồ.', 'bottom', 'center'),
+                    self::step('#tgra-compare-chart, .tgra-compare-chart-wrap', 'Biểu đồ doanh thu và đơn', 'Đường thể hiện doanh thu, cột thể hiện số đơn theo ngày/kỳ để nhìn tốc độ tăng giảm của từng shop.', 'top', 'center'),
+                    self::step('.tgra-sales-table', 'Bảng so sánh chi tiết', 'Đọc doanh thu, tỷ trọng, tăng trưởng, trung bình/ngày, số đơn và AOV để đánh giá hiệu quả từng shop.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('so sanh shop', 'shop nao ban tot', 'doanh thu theo shop'), 'Dùng bảng chi tiết để xếp hạng shop theo doanh thu, tỷ trọng và tăng trưởng. Biểu đồ phù hợp để xem xu hướng trong kỳ, bảng phù hợp để ra quyết định.'),
+                    self::knowledge(array('chon shop', 'top 3', 'checkbox'), 'Mặc định chỉ hiện một số shop nổi bật để biểu đồ không rối. Tick thêm shop trong danh sách bên trái hoặc dùng chọn tất cả khi cần so sánh toàn bộ.'),
+                    self::knowledge(array('aov', 'gia tri don', 'don trung binh'), 'AOV là doanh thu chia cho số đơn. Shop có doanh thu cao nhưng AOV thấp có thể đang bán nhiều đơn nhỏ; cần xem thêm SKU bán chạy và biên lợi nhuận.'),
+                    self::knowledge(array('tang truong', 'growth'), 'Tăng trưởng so sánh nửa sau với nửa đầu của kỳ đang lọc. Kỳ quá ngắn hoặc thiếu dữ liệu rollup có thể làm chỉ số này chưa đủ tin cậy.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-sales.php', '8. Quản lý bán hàng ở POS', '15. Nhóm báo cáo'))
+            ),
+
+            'rollup_product_sales' => self::guide(
+                'Bán hàng theo sản phẩm',
+                'Tab bán hàng theo sản phẩm giúp xem SKU nào bán chạy, cơ cấu giá trị bán, tồn còn lại, tốc độ bán và đóng góp theo từng shop.',
+                array('SKU bán chạy xem ở đâu?', 'Tồn còn lại tính thế nào?', 'Lọc sản phẩm trong bảng ra sao?'),
+                self::rollup_report_steps(array(
+                    self::step('.tgra-chart-grid .tgra-chart-card', 'Biểu đồ sản phẩm', 'Xem top sản phẩm bán chạy, cơ cấu giá trị bán và chỉ báo tồn kho sau kỳ để nắm nhanh mặt hàng trọng tâm.', 'bottom', 'center'),
+                    self::step('#tgra-ps-sku-search, .tgra-inv-search', 'Tìm SKU/sản phẩm', 'Tìm nhanh theo tên sản phẩm hoặc SKU trong bảng chi tiết trước khi đọc số lượng, giá trị và tồn.', 'bottom', 'center'),
+                    self::step('.tgra-tabs__nav', 'Tab tổng hợp và từng shop', 'Chọn Tổng hợp để xem toàn hệ thống hoặc chọn từng shop để xem đóng góp riêng của chi nhánh đó.', 'bottom', 'center'),
+                    self::step('#ps-shop-all, .tgra-tabs__panel--active', 'Bảng chi tiết SKU', 'Đọc số lượng bán, tốc độ bán, ngày tồn còn lại, tỷ trọng, tồn cuối, tồn max, giá trị bán, giá vốn và số shop có bán.', 'top', 'center'),
+                    self::step('.tgra-shop-summary', 'Tóm tắt theo tab', 'Các ô tóm tắt cho biết số SKU, tổng lượng bán, tổng lượng tồn và tổng giá trị bán của tab đang mở.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('sku ban chay', 'top san pham', 'ban hang theo san pham'), 'Top sản phẩm bán chạy xếp theo số lượng bán trong kỳ. Hãy đối chiếu thêm giá trị bán, giá vốn và tồn còn lại trước khi quyết định nhập thêm.'),
+                    self::knowledge(array('toc do ban', 'ngay con', 'days remaining'), 'Tốc độ bán là lượng bán chia cho số ngày trong kỳ. Số ngày tồn còn lại ước tính từ tồn cuối chia tốc độ bán, dùng để phát hiện SKU sắp thiếu.'),
+                    self::knowledge(array('ton max', 'min max', 'ton con lai'), 'Cột tồn max lấy từ cấu hình tồn kho nếu có. Nếu SKU bán tốt nhưng tồn thấp hơn nhu cầu, nên kiểm tra cảnh báo mua hàng hoặc cấu hình min/max.'),
+                    self::knowledge(array('shop nao ban', 'dong gop shop'), 'Dùng các tab shop để biết SKU bán ở chi nhánh nào, từ đó quyết định điều chuyển nội bộ hoặc mua thêm theo đúng địa điểm.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-product-sales.php', '5. Quét tồn thông minh và PO', '6. Quản lý mua hàng'))
+            ),
+
+            'rollup_inventory' => self::guide(
+                'Tồn kho theo SKU',
+                'Tab tồn kho theo SKU xem snapshot tồn, nhập/xuất, xuất nội bộ, cận hạn, hết hạn, tốc độ bán, số ngày tồn còn lại và ngưỡng min/max.',
+                array('Lọc SKU hết hàng ở đâu?', 'Min/max lấy từ đâu?', 'Số ngày tồn còn lại nghĩa là gì?'),
+                self::rollup_report_steps(array(
+                    self::step('#tgra-inv-sku-search, .tgra-inv-search', 'Tìm SKU trong tồn kho', 'Tìm theo tên hoặc SKU để đi nhanh tới dòng cần kiểm tra trong bảng tồn.', 'bottom', 'center'),
+                    self::step('#tgra-inv-filters', 'Bộ lọc trạng thái tồn', 'Lọc tất cả, hết hàng, sắp hết hạn, đã hết hạn, nhà cung cấp hoặc danh mục để ưu tiên xử lý hàng có rủi ro.', 'bottom', 'center'),
+                    self::step('#tgra-inv-filter-supplier, #tgra-inv-filter-category', 'Lọc NCC và danh mục', 'Thu hẹp bảng theo nhà cung cấp hoặc danh mục sản phẩm khi cần đối soát mua hàng hoặc xử lý hàng cận hạn.', 'bottom', 'center'),
+                    self::step('.tgra-tabs__nav', 'Tổng hợp hoặc từng shop', 'Tab Tổng hợp cộng gộp theo SKU; tab shop cho biết tồn riêng của từng chi nhánh.', 'bottom', 'center'),
+                    self::step('#inv-shop-all, .tgra-tabs__panel--active table', 'Bảng tồn chi tiết', 'Đọc tồn đầu, nhập, xuất bán, xuất nội bộ, hủy, điều chỉnh, tồn cuối, giá trị cuối, tốc độ bán, ngày tồn còn lại, min/max và trạng thái.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('het hang', 'stockout'), 'Nút Hết hàng lọc các SKU có tồn cuối bằng hoặc nhỏ hơn 0 trong snapshot. Đây là nhóm cần kiểm tra mua hàng hoặc điều chuyển trước.'),
+                    self::knowledge(array('sap het han', 'da het han', 'hsd'), 'Sắp hết hạn và đã hết hạn dựa trên HSD trong dữ liệu tồn. Dùng để ưu tiên xử lý bán, điều chuyển hoặc hủy hàng.'),
+                    self::knowledge(array('min max', 'cfg_min_qty', 'cfg_max_qty'), 'Min/max lấy từ cấu hình tồn kho của plugin mua hàng. Nếu cột này trống, SKU chưa có cấu hình ngưỡng tồn cho shop/kho tương ứng.'),
+                    self::knowledge(array('so ngay ton con lai', 'days remaining'), 'Số ngày tồn còn lại ước tính từ tồn cuối và tốc độ bán. Chỉ số này giúp biết SKU nào sắp thiếu dù hiện tại chưa hết hàng.'),
+                    self::knowledge(array('xuat noi bo', 'dieu chuyen noi bo'), 'Cột xuất nội bộ phản ánh hàng đã điều chuyển ra khỏi shop/kho trong kỳ, cần đối chiếu với tab Điều chuyển nội bộ khi thấy chênh lệch.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-inventory.php', '4. Kho hàng', '6. Quản lý mua hàng'))
+            ),
+
+            'rollup_transfer' => self::guide(
+                'Điều chuyển nội bộ trong báo cáo điều hành',
+                'Tab điều chuyển nội bộ tổng hợp luồng hàng đi, hàng đã đến đích và hàng còn đi đường theo SKU, HSD và shop nguồn.',
+                array('Hàng đi đường xem ở đâu?', 'Đối soát điều chuyển thế nào?', 'Giá trị đã đến đích nghĩa là gì?'),
+                self::rollup_report_steps(array(
+                    self::step('.tgra-dashboard h3, .tgra-panel__title', 'Báo cáo điều chuyển', 'Xác nhận đang xem tab điều chuyển nội bộ trong báo cáo điều hành.', 'bottom', 'start'),
+                    self::step('.tgra-dashboard table, table.widefat', 'Bảng tuyến điều chuyển', 'Đọc shop nguồn, sản phẩm, SKU, HSD, số lượng xuất nội bộ, giá trị xuất, số lượng đã đến đích và hàng còn đi đường.', 'top', 'center'),
+                    self::step('th, td', 'Các cột đối soát', 'So sánh số lượng xuất, số lượng đã đến đích và số lượng đi đường để phát hiện phiếu chưa hoàn tất hoặc có lệch nhận.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('hang di duong', 'pending', 'chua den'), 'Hàng đi đường là phần đã xuất nội bộ nhưng chưa ghi nhận đến đích trong rollup. Cần mở luồng transfer nếu số lượng này tồn lâu hoặc giá trị lớn.'),
+                    self::knowledge(array('da den dich', 'return_qty', 'gia tri da den'), 'Số lượng/giá trị đã đến đích phản ánh hàng đã được bên nhận ghi nhận trong hệ thống, dùng để đối soát với phiếu xuất nội bộ.'),
+                    self::knowledge(array('shop nguon', 'sku', 'hsd'), 'Đối soát điều chuyển nên đọc theo shop nguồn, SKU và HSD để tránh nhầm lô hàng, đặc biệt với sản phẩm tracking hạn sử dụng.'),
+                    self::knowledge(array('dieu chuyen noi bo', 'luan chuyen'), 'Tab này là báo cáo tổng hợp; thao tác tạo/nhận/trả phiếu nằm ở plugin tgs-transfer-management và các màn luân chuyển nội bộ.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-purchase.php', '4.5 Mua bán nội bộ', '4.6 Trả hàng nội bộ'))
+            ),
+
+            'rollup_purchase_suggestion' => self::guide(
+                'Cảnh báo mua hàng',
+                'Tab cảnh báo mua hàng gợi ý SKU cần nhập thêm theo tồn kho, tốc độ bán, hàng đi đường và cấu hình min/max của từng shop/kho.',
+                array('Cần nhập tính theo công thức nào?', 'Chọn shop/kho cảnh báo ở đâu?', 'Xuất Excel danh sách cần mua thế nào?'),
+                self::rollup_report_steps(array(
+                    self::step('.tgra-panel__subtitle', 'Công thức cảnh báo', 'Đọc công thức có cấu hình và chưa cấu hình để hiểu vì sao hệ thống đề xuất số lượng cần nhập.', 'bottom', 'center'),
+                    self::step('.tgra-tabs__nav a.tgra-tabs__tab', 'Chọn shop/kho cần xem', 'Mỗi tab là một site trong phạm vi. Site kho có nhãn Kho và dùng công thức khác shop bán lẻ.', 'bottom', 'center'),
+                    self::step('#ps-search, .tgra-inv-search', 'Tìm SKU cần nhập', 'Tìm theo SKU hoặc tên sản phẩm trong danh sách cảnh báo của shop/kho đang chọn.', 'bottom', 'center'),
+                    self::step('form[action*="admin-ajax.php"] button[type="submit"], .button-primary', 'Xuất Excel', 'Xuất danh sách đề xuất mua của shop/kho đang chọn để gửi bộ phận mua hàng hoặc nhà cung cấp.', 'left', 'center'),
+                    self::step('#ps-table, .tgra-tabs__panel--active table', 'Bảng đề xuất mua', 'Đọc nhà cung cấp, cơ sở tính, max, tốc độ bán/ngày, hàng đi đường, tồn kho và số lượng cần nhập.', 'top', 'center'),
+                    self::step('.tgra-chip--red, .tgra-chip--amber, .tgra-chip--green', 'Mức ưu tiên', 'Chip màu giúp phân biệt khẩn cấp, cần nhập và bổ sung để ưu tiên xử lý SKU quan trọng trước.', 'left', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('cong thuc', 'can nhap', 'suggest_qty'), 'Với site kho có cấu hình: cần nhập = Max + tốc độ bán - đi đường - tồn. Với shop có cấu hình: cần nhập = Max - tồn. Nếu chưa cấu hình, hệ thống ước tính theo tốc độ bán nhiều ngày rồi trừ tồn và hàng đi đường.'),
+                    self::knowledge(array('min max', 'co cau hinh', 'chua cau hinh'), 'Dòng có cấu hình dùng ngưỡng min/max tồn kho; dòng chưa cấu hình dùng tốc độ bán làm cơ sở tạm. Nên hoàn thiện cấu hình min/max để gợi ý mua ổn định hơn.'),
+                    self::knowledge(array('kho', 'shop', 'ps_shop_id'), 'Chọn đúng tab shop/kho trước khi xuất Excel hoặc lập PO. Kho thường cần tính thêm hàng đi đường và nhu cầu cấp cho shop con.'),
+                    self::knowledge(array('xuat excel', 'export'), 'Nút xuất Excel lấy đúng shop/kho đang chọn và danh sách đang có trong báo cáo. Dùng file này làm đầu vào rà soát mua hàng hoặc tạo PO.'),
+                    self::knowledge(array('po', 'mua hang', 'nha cung cap'), 'Sau khi rà soát cảnh báo, có thể chuyển sang luồng PO/chủ động mua trong tgs_purchase_management để gom SKU theo NCC, lô mua hoặc chính sách mua.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-purchase-suggestion.php', '5. Quét tồn thông minh và PO', '6. Quản lý mua hàng'))
+            ),
+
+            'rollup_customer' => self::guide(
+                'Thống kê khách hàng',
+                'Tab thống kê khách hàng phân tích khách mới/cũ, doanh thu khách hàng, phân bổ theo shop, tần suất mua và số ngày chưa quay lại.',
+                array('Khách mới và khách cũ tính thế nào?', 'Top khách hàng xem ở đâu?', 'Vì sao chưa có dữ liệu khách hàng?'),
+                self::rollup_report_steps(array(
+                    self::step('.tgra-shop-summary', 'KPI khách hàng', 'Xem tổng khách, khách mới, khách cũ quay lại, giá trị đơn trung bình và tổng doanh thu của tập khách trong kỳ.', 'bottom', 'center'),
+                    self::step('#tgra-customer-shop-chart, #tgra-customer-newold-chart', 'Biểu đồ khách hàng', 'So sánh phân bổ khách theo shop và tỷ lệ khách mới/khách cũ để đánh giá chất lượng tệp khách.', 'top', 'center'),
+                    self::step('.tgra-sales-table', 'Chi tiết theo shop', 'Đọc số khách, khách mới, khách cũ và tỷ trọng của từng shop trong tổng khách hàng.', 'top', 'center'),
+                    self::step('#tgra-cust-search, .tgra-inv-search', 'Tìm khách hàng', 'Tìm theo tên hoặc số điện thoại trong danh sách khách hàng của kỳ đang lọc.', 'bottom', 'center'),
+                    self::step('#cust-shop-all, .tgra-tabs__nav', 'Danh sách khách theo shop', 'Chọn Tổng hợp hoặc từng shop để xem khách mua trong kỳ, số đơn, doanh thu, đơn trung bình và ngày chưa mua.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('khach moi', 'khach cu'), 'Khách mới là khách phát sinh lần mua đầu trong kỳ; khách cũ là khách đã có lịch sử trước đó và quay lại mua. Tỷ lệ này giúp đánh giá tăng trưởng tệp khách.'),
+                    self::knowledge(array('top khach', 'doanh thu khach', 'avg order'), 'Danh sách khách hàng sắp xếp theo giá trị/tần suất mua để nhận diện khách quan trọng, khách cần chăm sóc hoặc khách lâu chưa quay lại.'),
+                    self::knowledge(array('ngay chua mua', 'inactive'), 'Cột ngày chưa mua giúp phát hiện khách có nguy cơ rời bỏ. Mốc càng cao càng nên đưa vào chiến dịch chăm sóc lại.'),
+                    self::knowledge(array('chua co du lieu khach hang', 'dim_customer'), 'Nếu màn khách hàng báo chưa có dữ liệu, cần chạy Customer Rollup hoặc kiểm tra trang Đồng bộ dữ liệu của tgs_rollup_analytics.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-customer.php', '2.1 Khách hàng', '15. Nhóm báo cáo'))
+            ),
+
+            'rollup_sell_speed' => self::guide(
+                'Tốc độ bán theo sản phẩm',
+                'Màn tốc độ bán cho biết SKU nào bán nhanh, xu hướng bán theo tuần/tháng, số lượng bán trung bình mỗi ngày và dữ liệu hỗ trợ dự báo hết hàng.',
+                array('Tốc độ bán tính ra sao?', 'Lọc riêng SKU thế nào?', 'Dùng tốc độ bán cho mua hàng ra sao?'),
+                self::rollup_report_steps(array(
+                    self::step('select[name="group_by"], input[name="sku"]', 'Nhóm theo tuần/tháng và SKU', 'Chọn nhóm theo tuần hoặc tháng, nhập một hoặc nhiều SKU để phân tích riêng mặt hàng cần theo dõi.', 'bottom', 'center'),
+                    self::step('.tgra-chart-grid .tgra-chart-card', 'Biểu đồ tốc độ bán', 'Xem top SKU bán nhanh, xu hướng tổng bán ra và các chỉ báo hiệu suất bán trong kỳ.', 'bottom', 'center'),
+                    self::step('#tgra-ss-search, .tgra-inv-search', 'Tìm trong bảng tốc độ bán', 'Tìm SKU, tên sản phẩm hoặc kỳ để kiểm tra chi tiết nhanh hơn.', 'bottom', 'center'),
+                    self::step('.tgra-panel table, .tgra-table-wrap', 'Bảng chi tiết theo kỳ', 'Mỗi dòng là một SKU trong một tuần/tháng, giúp thấy SKU tăng tốc hoặc giảm tốc theo thời gian.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('toc do ban', 'sell speed', 'sp ngay'), 'Tốc độ bán là số lượng xuất bán chia cho số ngày trong kỳ. Chỉ số này là đầu vào quan trọng để tính ngày tồn còn lại và gợi ý mua hàng.'),
+                    self::knowledge(array('group by', 'tuan', 'thang'), 'Nhóm theo tuần phù hợp theo dõi biến động ngắn; nhóm theo tháng phù hợp quyết định mua hàng và nhìn xu hướng dài hơn.'),
+                    self::knowledge(array('loc sku', 'sku001'), 'Có thể nhập nhiều SKU cách nhau bằng dấu phẩy để chỉ phân tích các mặt hàng đang cần quyết định nhập hoặc điều chuyển.'),
+                    self::knowledge(array('mua hang', 'du bao het hang'), 'Khi SKU có tốc độ bán cao nhưng tồn thấp, hãy kiểm tra tiếp Cảnh báo mua hàng hoặc Dự báo hết hàng trước khi tạo PO.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-sell-speed.php', '5. Quét tồn thông minh và PO', '6. Quản lý mua hàng'))
+            ),
+
+            'rollup_stockout_forecast' => self::guide(
+                'Dự báo hết hàng',
+                'Màn dự báo hết hàng ước tính số ngày còn lại của từng SKU dựa trên tồn hiện tại và tốc độ bán trong khoảng thời gian đã chọn.',
+                array('SKU sắp hết hàng xem ở đâu?', 'Số ngày còn lại tính thế nào?', 'SKU chưa có dữ liệu bán nghĩa là gì?'),
+                self::rollup_report_steps(array(
+                    self::step('input[name="date_from"], input[name="date_to"], input[name="sku"]', 'Tham số dự báo', 'Chọn khoảng thời gian dùng để tính tốc độ bán và nhập SKU nếu chỉ muốn dự báo một nhóm mặt hàng.', 'bottom', 'center'),
+                    self::step('.tgra-kpi-grid', 'Nhóm cảnh báo hết hàng', 'Đọc số SKU sắp hết trong dưới 7 ngày, cần theo dõi 7-30 ngày, an toàn trên 30 ngày và chưa có dữ liệu bán.', 'bottom', 'center'),
+                    self::step('#sof-search, .tgra-search-input', 'Tìm SKU dự báo', 'Tìm nhanh theo SKU hoặc tên sản phẩm trong bảng dự báo.', 'bottom', 'center'),
+                    self::step('#sof-table, .tgra-table--striped', 'Bảng dự báo', 'Đọc tồn hiện tại, tốc độ bán, số ngày còn lại, trạng thái và số shop đang có SKU đó.', 'top', 'center'),
+                )),
+                self::rollup_report_knowledge(array(
+                    self::knowledge(array('sap het hang', 'critical', '7 ngay'), 'Nhóm sắp hết hàng là SKU có số ngày còn lại dưới 7 ngày. Đây là nhóm cần kiểm tra mua hàng hoặc điều chuyển trước.'),
+                    self::knowledge(array('so ngay con lai', 'days until stockout'), 'Số ngày còn lại được ước tính từ tồn hiện tại chia tốc độ bán mỗi ngày. Nếu không có tốc độ bán, hệ thống không thể dự báo chính xác.'),
+                    self::knowledge(array('chua co du lieu ban', 'unknown'), 'SKU chưa có dữ liệu bán có thể là hàng mới, hàng không bán trong kỳ hoặc dữ liệu rollup chưa đủ. Không nên kết luận an toàn chỉ vì chưa có dự báo.'),
+                    self::knowledge(array('sku', 'loc sku'), 'Nhập danh sách SKU khi cần tập trung vào nhóm hàng chiến lược, hàng khuyến mãi hoặc SKU đang chuẩn bị đặt mua.'),
+                )),
+                array('sourceSections' => array('tgs_rollup_analytics: shop-report-stockout-forecast.php', '5. Quét tồn thông minh và PO', '6. Quản lý mua hàng'))
+            ),
+
+            'rollup_sync' => self::guide(
+                'Đồng bộ dữ liệu Rollup',
+                'Màn đồng bộ dữ liệu của tgs_rollup_analytics dùng để kiểm tra schema, chạy rollup/reroll sales, inventory, transfer, customer và theo dõi lịch cron.',
+                array('Khi nào cần chạy rollup?', 'Rollup và reroll khác gì?', 'Kiểm tra cron ở đâu?'),
+                array(
+                    self::step('.tgra-dashboard .tgra-panel--soft, .wrap.tgra-dashboard', 'Bảng điều khiển Rollup', 'Đây là nơi vận hành dữ liệu nền cho các báo cáo điều hành. Chỉ người phụ trách dữ liệu nên chạy thao tác thủ công.', 'bottom', 'center'),
+                    self::step('.tgra-rollup-table', 'Chạy rollup/reroll thủ công', 'Chọn khoảng ngày rồi chạy Inventory, Sales hoặc Transfer. Customer và Dimensions chạy riêng vì là dữ liệu nền toàn cục.', 'top', 'center'),
+                    self::step('.tgra-shared-date', 'Khoảng ngày xử lý', 'Ngày từ/đến quyết định dữ liệu nào được build lại. Chọn quá rộng có thể mất thời gian và ảnh hưởng hiệu năng.', 'bottom', 'center'),
+                    self::step('.tgra-reroll-trigger', 'Reroll dữ liệu', 'Reroll dùng khi cần xóa/tính lại dữ liệu rollup của kỳ đã chọn, thường sau khi sửa dữ liệu gốc hoặc nghi ngờ số liệu sai.', 'left', 'center'),
+                    self::step('a[href*="tab=cron-settings"], a[href*="tab=cron-diagram"]', 'Cấu hình và sơ đồ cron', 'Mở cài đặt hoặc sơ đồ để kiểm tra lịch tự động chạy các loại rollup.', 'bottom', 'center'),
+                    self::step('table.widefat', 'Trạng thái bảng và lịch sử', 'Kiểm tra bảng rollup có tồn tại, lần chạy gần nhất, trạng thái hoàn thành/lỗi và thời gian xử lý.', 'top', 'center'),
+                ),
+                array(
+                    self::knowledge(array('rollup', 'chay rollup', 'dong bo du lieu'), 'Chạy rollup khi báo cáo trống, số liệu cũ, vừa import/sửa dữ liệu lớn hoặc cần build lại một khoảng ngày cụ thể.'),
+                    self::knowledge(array('reroll', 'tinh lai', 'rebuild'), 'Rollup thường cập nhật thêm dữ liệu; reroll dùng khi cần tính lại kỳ đã có dữ liệu để sửa sai lệch sau khi dữ liệu nguồn thay đổi.'),
+                    self::knowledge(array('dimensions', 'shop', 'product'), 'Dimensions đồng bộ dữ liệu nền như shop và sản phẩm để các fact sales/inventory/transfer map đúng tên, SKU và chi nhánh.'),
+                    self::knowledge(array('cron', 'lich tu dong'), 'Lịch cron cho biết loại rollup nào đang bật và lần chạy tiếp theo. Nếu cron tắt, báo cáo chỉ mới khi có người chạy thủ công.'),
+                    self::knowledge(array('schema', 'bang thieu'), 'Nếu bảng rollup thiếu, chạy đồng bộ schema trước. Không có bảng nền thì các báo cáo điều hành có thể không đọc được dữ liệu.'),
+                ),
+                array('sourceSections' => array('tgs_rollup_analytics: admin/views/dashboard.php', '15. Nhóm báo cáo'))
+            ),
+
             'settings' => self::guide(
                 'Cài đặt hệ thống',
                 'Trang cài đặt kiểm soát các feature nhạy cảm theo từng website chi nhánh trong multisite.',
@@ -1996,6 +2224,28 @@ final class TGS_AI_Guides_Registry
             'terms' => $terms,
             'answer' => $answer,
         );
+    }
+
+    private static function rollup_report_steps($extra_steps = array())
+    {
+        return array_merge(array(
+            self::step('.tgra-report-tabs', 'Các tab báo cáo điều hành', 'Chuyển giữa tổng quan, doanh thu theo shop, bán hàng theo sản phẩm, tồn kho SKU, điều chuyển nội bộ, cảnh báo mua hàng và thống kê khách hàng.', 'bottom', 'center'),
+            self::step('.tgra-quick-filters', 'Lọc nhanh thời gian', 'Dùng hôm nay, hôm qua, tuần này, tháng này, quý này hoặc năm nay để đổi kỳ báo cáo nhanh mà vẫn giữ đúng ngữ cảnh view hiện tại.', 'bottom', 'center'),
+            self::step('.tgra-filter-grid, .tgra-form', 'Bộ lọc báo cáo', 'Chọn từ ngày, đến ngày, phạm vi chi nhánh và hàng chiến lược trước khi bấm lọc để số liệu khớp nhu cầu điều hành.', 'bottom', 'center'),
+            self::step('#tgra_selected_blog_ids, #btn-tgra_selected_blog_ids, .tgs-branch-selector-wrapper', 'Chi nhánh thống kê', 'Chọn một hoặc nhiều shop/kho trong phạm vi được phân quyền. Số liệu KPI, chart và bảng sẽ chỉ tính trên các chi nhánh này.', 'bottom', 'center'),
+            self::step('#tgra_global_sci_ids, #btn-tgra_global_sci_ids, .tgs-hcl-selector-wrapper', 'Hàng chiến lược', 'Nếu cần xem riêng nhóm hàng chiến lược, mở bộ chọn HCL rồi xác nhận. Để trống khi muốn xem toàn bộ SKU trong phạm vi đã chọn.', 'bottom', 'center'),
+            self::step('.tgra-filter-submit, button[type="submit"].button-primary', 'Lọc báo cáo', 'Bấm sau khi đổi ngày, chi nhánh hoặc HCL. Các tab báo cáo rollup sẽ đọc dữ liệu đã tổng hợp theo bộ lọc này.', 'left', 'center'),
+        ), $extra_steps);
+    }
+
+    private static function rollup_report_knowledge($extra_knowledge = array())
+    {
+        return array_merge(array(
+            self::knowledge(array('rollup', 'du lieu nen', 'dong bo', 'cron'), 'Báo cáo điều hành lấy số liệu từ dữ liệu rollup đã tổng hợp. Nếu thấy số liệu trống, cũ hoặc thiếu khách hàng/tồn kho, hãy kiểm tra trang Đồng bộ dữ liệu để chạy rollup hoặc xem lịch cron.'),
+            self::knowledge(array('tu ngay', 'den ngay', 'hom nay', 'tuan nay', 'thang nay', 'quy nay', 'nam nay'), 'Dùng lọc nhanh thời gian hoặc nhập từ ngày/đến ngày thủ công. Kỳ báo cáo quyết định toàn bộ KPI, chart và bảng trong tab đang xem.'),
+            self::knowledge(array('chi nhanh', 'shop', 'kho', 'pham vi'), 'Bộ chọn chi nhánh giới hạn dữ liệu theo shop/kho được phân quyền. Khi so sánh nhiều shop, hãy kiểm tra lại số chi nhánh đang chọn trước khi đọc kết quả.'),
+            self::knowledge(array('hang chien luoc', 'hcl', 'global_sci'), 'Bộ lọc hàng chiến lược dùng để thu hẹp báo cáo theo nhóm SKU trọng tâm. Nếu không chọn HCL, báo cáo tính trên toàn bộ hàng trong phạm vi chi nhánh.'),
+        ), $extra_knowledge);
     }
 
     private static function normalize($value)
