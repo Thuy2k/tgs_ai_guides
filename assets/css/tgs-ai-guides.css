@@ -1,7 +1,11 @@
+:root {
+    --tgs-ai-guide-bottom: 104px;
+}
+
 .tgs-ai-guide-launcher {
     position: fixed;
     right: 22px;
-    bottom: 22px;
+    bottom: var(--tgs-ai-guide-bottom);
     z-index: 1060;
     display: inline-flex;
     align-items: center;
@@ -65,10 +69,10 @@
 .tgs-ai-guide-panel {
     position: fixed;
     right: 22px;
-    bottom: 82px;
+    bottom: calc(var(--tgs-ai-guide-bottom, 104px) + 60px);
     z-index: 1061;
     width: min(420px, calc(100vw - 28px));
-    max-height: min(680px, calc(100vh - 112px));
+    max-height: min(680px, calc(100vh - var(--tgs-ai-guide-bottom) - 88px));
     display: none;
     flex-direction: column;
     overflow: hidden;
@@ -384,17 +388,19 @@
 }
 
 @media (max-width: 600px) {
+    :root {
+        --tgs-ai-guide-bottom: 96px;
+    }
+
     .tgs-ai-guide-launcher {
         right: 14px;
-        bottom: 14px;
         min-height: 44px;
         padding: 0 13px;
     }
 
     .tgs-ai-guide-panel {
         right: 14px;
-        bottom: 68px;
-        max-height: calc(100vh - 88px);
+        bottom: calc(var(--tgs-ai-guide-bottom, 96px) + 58px);
     }
 
     .tgs-ai-guide-actions {
