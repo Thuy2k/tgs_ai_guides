@@ -20,7 +20,15 @@
     font-size: 14px;
     line-height: 1;
     box-shadow: 0 10px 24px rgba(15, 23, 42, .22);
-    cursor: pointer;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.tgs-ai-guide-launcher.is-dragging {
+    cursor: grabbing;
+    transition: none;
+    will-change: transform;
 }
 
 .tgs-ai-guide-launcher i {

@@ -15,7 +15,8 @@
         lastTourHadGlobalSteps: false,
         guidesEnabled: true,
         quickExpanded: false,
-        lastQuickQuestions: []
+        lastQuickQuestions: [],
+        suppressLauncherClick: false
     };
 
     function ready(callback) {
@@ -300,7 +301,128 @@
         }
     }
 
+    function clampNumber(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+    }
+
+    function bindLauncherDrag(launcher) {
+        if (!launcher || typeof window.PointerEvent === 'undefined') {
+            return;
+        }
+
+        var drag = null;
+        var threshold = 4;
+        var frame = null;
+
+        function applyDragTransform(offset) {
+            launcher.style.transform = 'translate3d(0, ' + offset + 'px, 0)';
+
+            var panel = document.getElementById('tgsAiGuidePanel');
+            if (panel && panel.classList.contains('is-open')) {
+                panel.style.transform = 'translate3d(0, ' + offset + 'px, 0)';
+            }
+        }
+
+        function clearDragTransform() {
+            launcher.style.transform = '';
+
+            var panel = document.getElementById('tgsAiGuidePanel');
+            if (panel) {
+                panel.style.transform = '';
+            }
+        }
+
+        launcher.addEventListener('click', function (event) {
+            if (!state.suppressLauncherClick) {
+                return;
+            }
+            state.suppressLauncherClick = false;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }, true);
+
+        launcher.addEventListener('pointerdown', function (event) {
+            if (event.button !== undefined && event.button !== 0) {
+                return;
+            }
+
+            var rect = launcher.getBoundingClientRect();
+            drag = {
+                pointerId: event.pointerId,
+                startY: event.clientY,
+                startBottom: window.innerHeight - rect.bottom,
+                height: rect.height,
+                moved: false
+            };
+
+            launcher.classList.add('is-dragging');
+            launcher.setPointerCapture(event.pointerId);
+        });
+
+        launcher.addEventListener('pointermove', function (event) {
+            if (!drag || event.pointerId !== drag.pointerId) {
+                return;
+            }
+
+            var delta = drag.startY - event.clientY;
+            if (Math.abs(delta) > threshold) {
+                drag.moved = true;
+            }
+
+            if (!drag.moved) {
+                return;
+            }
+
+            event.preventDefault();
+            var minBottom = 16;
+            var maxBottom = Math.max(minBottom, window.innerHeight - drag.height - 16);
+            drag.nextBottom = clampNumber(drag.startBottom + delta, minBottom, maxBottom);
+            drag.offset = drag.startBottom - drag.nextBottom;
+
+            if (frame) {
+                return;
+            }
+
+            frame = window.requestAnimationFrame(function () {
+                frame = null;
+                if (!drag) {
+                    return;
+                }
+                applyDragTransform(Math.round(drag.offset || 0));
+            });
+        });
+
+        function endDrag(event) {
+            if (!drag || event.pointerId !== drag.pointerId) {
+                return;
+            }
+
+            if (frame) {
+                window.cancelAnimationFrame(frame);
+                frame = null;
+            }
+
+            if (drag.moved) {
+                state.suppressLauncherClick = true;
+                document.documentElement.style.setProperty('--tgs-ai-guide-bottom', Math.round(drag.nextBottom || drag.startBottom) + 'px');
+            }
+
+            clearDragTransform();
+
+            launcher.classList.remove('is-dragging');
+            try {
+                launcher.releasePointerCapture(event.pointerId);
+            } catch (error) {}
+            drag = null;
+        }
+
+        launcher.addEventListener('pointerup', endDrag);
+        launcher.addEventListener('pointercancel', endDrag);
+    }
+
     function bindShellEvents(launcher, panel) {
+        bindLauncherDrag(launcher);
+
         launcher.addEventListener('click', function () {
             if (!state.guidesEnabled) {
                 setGuidesDisabled(false);
